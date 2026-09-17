@@ -1,0 +1,10 @@
+# basic infix + function-call mix
+A = [[1,2],[3,4]]
+B = [[5,6],[7,8]]
+C = A + B
+D = add(A, B, C)
+E = multiply(A, B, C, D)
+print(E)
+F = subtract(A, B)
+G = transpose(A)
+H = inverse(B)
