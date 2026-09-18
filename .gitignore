@@ -53,3 +53,11 @@ dkms.conf
 
 # debug information files
 *.dwo
+
+# compiled binaries from gcc test builds
+tests/*_test
+tests/lexer_test
+tests/parser_test
+tests/semantic_test
+*.o
+*.out
