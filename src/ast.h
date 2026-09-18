@@ -47,6 +47,14 @@ typedef struct ASTNode {
     struct ASTNode **args;
     int arg_count;
 
+    /* Filled in by semantic analysis (0 until then): the dimensions this
+     * expression evaluates to. Valid on IDENTIFIER, MATRIX_LITERAL, BINOP,
+     * and FUNC_CALL nodes. The optimizer reads these later instead of
+     * recomputing dimensions itself.
+     */
+    int result_rows;
+    int result_cols;
+
     /* NODE_ASSIGN */
     char target[AST_NAME_MAX];
     struct ASTNode *value;

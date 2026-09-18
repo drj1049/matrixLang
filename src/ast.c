@@ -98,7 +98,9 @@ void ast_print(const ASTNode *node, int indent) {
 
     switch (node->type) {
         case NODE_IDENTIFIER:
-            printf("Identifier(%s)\n", node->name);
+            printf("Identifier(%s)", node->name);
+            if (node->result_rows > 0) printf(" -> %dx%d", node->result_rows, node->result_cols);
+            printf("\n");
             break;
 
         case NODE_MATRIX_LITERAL:
@@ -113,13 +115,17 @@ void ast_print(const ASTNode *node, int indent) {
             break;
 
         case NODE_BINOP:
-            printf("BinOp(%c)\n", node->op);
+            printf("BinOp(%c)", node->op);
+            if (node->result_rows > 0) printf(" -> %dx%d", node->result_rows, node->result_cols);
+            printf("\n");
             ast_print(node->left, indent + 1);
             ast_print(node->right, indent + 1);
             break;
 
         case NODE_FUNC_CALL:
-            printf("FuncCall(%s, %d args)\n", func_kind_name(node->func_kind), node->arg_count);
+            printf("FuncCall(%s, %d args)", func_kind_name(node->func_kind), node->arg_count);
+            if (node->result_rows > 0) printf(" -> %dx%d", node->result_rows, node->result_cols);
+            printf("\n");
             for (int i = 0; i < node->arg_count; i++) {
                 ast_print(node->args[i], indent + 1);
             }

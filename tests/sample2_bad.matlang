@@ -1,0 +1,4 @@
+# deliberately broken: A is 2x2, B is 3x2 -- add() requires identical dims
+A = [[1,2],[3,4]]
+B = [[1,2],[3,4],[5,6]]
+C = add(A, B)
