@@ -57,6 +57,15 @@ static int env_find(Env *env, const char *name) {
 }
 
 static void env_set(Env *env, const char *name, const Value *v) {
+    /* Snapshot v's data into independent memory BEFORE touching env->slots.
+     * v often points *into* env->slots (e.g. a plain copy statement reads
+     * the source variable's slot directly) -- growing env->slots below can
+     * relocate that array, which would leave v dangling if we read from it
+     * afterward. Copying first makes this safe regardless of what happens
+     * to the slots array next.
+     */
+    Value snapshot = copy_value(v);
+
     int idx = env_find(env, name);
     if (idx == -1) {
         env->count++;
@@ -67,7 +76,7 @@ static void env_set(Env *env, const char *name, const Value *v) {
     } else {
         free_value(&env->slots[idx].val);
     }
-    env->slots[idx].val = copy_value(v);
+    env->slots[idx].val = snapshot;
 }
 
 static Value *env_get(Env *env, const char *name) {
