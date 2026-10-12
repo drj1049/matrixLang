@@ -63,3 +63,4 @@ tests/semantic_test
 *.out
 build/
 .DS_Store
+.DS_Store
