@@ -1,0 +1,2 @@
+# identity needs a size of at least 1
+X = identity(0)

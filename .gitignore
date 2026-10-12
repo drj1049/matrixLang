@@ -1,66 +1,15 @@
-# Prerequisites
-*.d
-
-# Object files
-*.o
-*.ko
-*.obj
-*.elf
-
-# Linker output
-*.ilk
-*.map
-*.exp
-
-# Precompiled Headers
-*.gch
-*.pch
-
-# Libraries
-*.lib
-*.a
-*.la
-*.lo
-
-# Shared objects (inc. Windows DLLs)
-*.dll
-*.so
-*.so.*
-*.dylib
-
-# Executables
-*.exe
-*.out
-*.app
-*.i*86
-*.x86_64
-*.hex
-
-# Debug files
-*.dSYM/
-*.su
-*.idb
-*.pdb
-
-# Kernel Module Compile Results
-*.mod*
-*.cmd
-.tmp_versions/
-modules.order
-Module.symvers
-Mkfile.old
-dkms.conf
-
-# debug information files
-*.dwo
-
-# compiled binaries from gcc test builds
-tests/*_test
-tests/lexer_test
-tests/parser_test
-tests/semantic_test
-*.o
-*.out
+# compiler output (make recreates it)
 build/
+
+# test drivers compiled by hand next to their source, e.g. tests/lexer_test
+tests/*_test
+
+# C build leftovers
+*.o
+*.out
+*.exe
+*.dSYM/
+
+# macOS and Python
 .DS_Store
-.DS_Store
+__pycache__/

@@ -4,7 +4,7 @@
 /* ---- Token types ----
  * Covers: identifiers, numbers, matrix literals ([ ]),
  * infix operators (+ - * =), function-call keywords
- * (add/subtract/multiply/transpose/inverse), print,
+ * (add/subtract/multiply/transpose/inverse), identity/zeros, print,
  * and punctuation needed for argument lists (, ; ( )).
  */
 typedef enum {
@@ -33,6 +33,8 @@ typedef enum {
     TOK_MULTIPLY,
     TOK_TRANSPOSE,
     TOK_INVERSE,
+    TOK_IDENTITY,   /* identity(n): the n x n identity matrix */
+    TOK_ZEROS,      /* zeros(r, c): an r x c matrix of zeros */
     TOK_PRINT,
 
     /* keywords for programs that compile to a callable function */

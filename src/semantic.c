@@ -93,6 +93,12 @@ static void check_expr(SymbolTable *st, ASTNode *node) {
             node->result_cols = node->cols;
             break;
 
+        case NODE_MATRIX_GEN:
+            /* identity(n) and zeros(r, c) carry their size in the node */
+            node->result_rows = node->rows;
+            node->result_cols = node->cols;
+            break;
+
         case NODE_IDENTIFIER: {
             int r, c;
             if (!symtab_get(st, node->name, &r, &c)) {

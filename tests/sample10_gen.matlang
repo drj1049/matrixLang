@@ -1,0 +1,11 @@
+# negative numbers, identity(n) and zeros(rows, cols)
+A = [[1,-2.5],[-3,4]]
+I = identity(2)
+Z = zeros(2,3)
+B = A * I
+C = B * Z
+D = A + identity(2)
+print(A)
+print(B)
+print(C)
+print(D)

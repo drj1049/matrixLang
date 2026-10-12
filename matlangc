@@ -1,8 +1,15 @@
 #!/bin/sh
 set -e
 
+# -O0 turns the optimizer off, -O1 (the default) leaves it on
+opt=""
+if [ "$1" = "-O0" ] || [ "$1" = "-O1" ]; then
+  opt="$1"
+  shift
+fi
+
 if [ -z "$1" ]; then
-  echo "usage: ./matlangc file.matlang [function_name]"
+  echo "usage: ./matlangc [-O0|-O1] file.matlang [function_name]"
   exit 1
 fi
 
@@ -10,7 +17,7 @@ make -s build/compiler
 
 name=$(basename "$1" .matlang)
 rm -f "build/$name.h"
-./build/compiler "$1" "build/$name.c" $2
+./build/compiler $opt "$1" "build/$name.c" $2
 
 # a program with input/output becomes a function for other C code to call,
 # so there is nothing to run

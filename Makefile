@@ -9,8 +9,8 @@ HDRS = $(wildcard src/*.h)
 STAGES = lexer parser semantic optimizer optimizer_prog tac interp
 BINS   = build/compiler $(STAGES:%=build/%_test)
 
-GOOD = sample1 sample4_chain
-BAD  = sample2_bad sample3_undefined sample7_bad_input sample8_bad_output
+GOOD = sample1 sample4_chain sample10_gen
+BAD  = sample2_bad sample3_undefined sample7_bad_input sample8_bad_output sample11_bad_size
 
 .PHONY: all test run ui clean
 
@@ -28,13 +28,14 @@ build/%_test: tests/%_test.c $(SRCS) $(HDRS) | build
 	$(CC) $(CFLAGS) $< $(SRCS) -o $@ $(LDLIBS)
 
 # compile a program to C, build it and run it: make run FILE=tests/sample1.matlang
+# add OPT=-O0 to switch the optimizer off: make run FILE=... OPT=-O0
 # a program with input/output has no main to run, so it stops after writing
 # the function: make run FILE=tests/sample5_func.matlang NAME=my_function
 run: build/compiler
 	@test -n "$(FILE)" || { echo "usage: make run FILE=file.matlang [NAME=function_name]"; exit 1; }
 	@name=$$(basename "$(FILE)" .matlang); \
 	rm -f "build/$$name.h"; \
-	./build/compiler "$(FILE)" "build/$$name.c" $(NAME) || exit 1; \
+	./build/compiler $(OPT) "$(FILE)" "build/$$name.c" $(NAME) || exit 1; \
 	if [ -f "build/$$name.h" ]; then \
 		echo "wrote build/$$name.c and build/$$name.h:"; \
 		grep '^Mat ' "build/$$name.h"; \
@@ -55,9 +56,23 @@ test: all
 		echo "PASS $$s (compiled output matches interpreter)" || \
 		{ echo "FAIL $$s"; exit 1; }; \
 	done
+	@for s in $(GOOD); do \
+		./build/compiler -O0 tests/$$s.matlang build/$$s.O0.c && \
+		$(CC) -Isrc build/$$s.O0.c -o build/$$s.O0 $(LDLIBS) && \
+		./build/$$s.O0 > build/$$s.O0.txt && \
+		diff build/$$s.O0.txt build/$$s.gen.txt > /dev/null && \
+		echo "PASS $$s with -O0 (same answer with the optimizer off)" || \
+		{ echo "FAIL $$s with -O0"; exit 1; }; \
+	done
+	@if cmp -s build/sample4_chain.c build/sample4_chain.O0.c; then \
+		echo "FAIL -O0 made no difference to the sample4_chain code"; exit 1; \
+	else \
+		echo "PASS -O0 changes the multiplication order in sample4_chain"; \
+	fi
 	@./build/compiler tests/sample5_func.matlang build/sample5_func.c && \
 	./build/compiler tests/sample6_alias.matlang build/sample6_alias.c alias_copy && \
-	$(CC) $(CFLAGS) -Ibuild tests/func_caller.c build/sample5_func.c build/sample6_alias.c \
+	./build/compiler tests/sample12_gen_func.matlang build/sample12_gen_func.c gen_func && \
+	$(CC) $(CFLAGS) -Ibuild tests/func_caller.c build/sample5_func.c build/sample6_alias.c build/sample12_gen_func.c \
 		-o build/func_caller $(LDLIBS) && \
 	./build/func_caller && \
 	echo "PASS func_caller (generated functions return the right, freshly allocated result)" || \

@@ -24,6 +24,8 @@ static const Keyword KEYWORDS[] = {
     {"multiply",  TOK_MULTIPLY},
     {"transpose", TOK_TRANSPOSE},
     {"inverse",   TOK_INVERSE},
+    {"identity",  TOK_IDENTITY},
+    {"zeros",     TOK_ZEROS},
     {"print",     TOK_PRINT},
     {"input",     TOK_INPUT},
     {"output",    TOK_OUTPUT},
@@ -169,6 +171,8 @@ const char *token_type_name(TokenType type) {
         case TOK_MULTIPLY:   return "MULTIPLY";
         case TOK_TRANSPOSE:  return "TRANSPOSE";
         case TOK_INVERSE:    return "INVERSE";
+        case TOK_IDENTITY:   return "IDENTITY";
+        case TOK_ZEROS:      return "ZEROS";
         case TOK_PRINT:      return "PRINT";
         case TOK_INPUT:      return "INPUT";
         case TOK_OUTPUT:     return "OUTPUT";

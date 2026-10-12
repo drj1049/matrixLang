@@ -23,6 +23,7 @@ static ASTNode *parse_expr(void);      /* term (('+'|'-') term)* */
 static ASTNode *parse_term(void);      /* factor ('*' factor)* */
 static ASTNode *parse_factor(void);    /* ID | matrixLiteral */
 static ASTNode *parse_matrix_literal(void);
+static ASTNode *parse_matrix_gen(void);
 static ASTNode *parse_func_call(void);
 static ASTNode *parse_statement(void);
 
@@ -31,7 +32,8 @@ static int is_func_keyword(TokenType t) {
            t == TOK_TRANSPOSE || t == TOK_INVERSE;
 }
 
-/* ---- matrixLiteral -> '[' row (',' row)* ']', row -> '[' NUMBER (',' NUMBER)* ']'
+/* ---- matrixLiteral -> '[' row (',' row)* ']', row -> '[' value (',' value)* ']'
+ * value -> ['-'] NUMBER
  * Reads one row at a time into a growable buffer, all rows must have the
  * same column count (checked here, since a ragged matrix is never valid).
  */
@@ -50,10 +52,17 @@ static ASTNode *parse_matrix_literal(void) {
         int this_row_cols = 0;
 
         do {
+            int negative = 0;
+            if (lex_peek().type == TOK_MINUS) {
+                lex_advance();
+                negative = 1;
+            }
             Token num = expect(TOK_NUMBER, "expected a number inside matrix row");
+            double value = atof(num.text);
             this_row_cols++;
             row_values = realloc(row_values, sizeof(double) * this_row_cols);
-            row_values[this_row_cols - 1] = atof(num.text);
+            /* "-0" stays 0, so it never prints as -0 */
+            row_values[this_row_cols - 1] = (negative && value != 0) ? -value : value;
         } while (lex_peek().type == TOK_COMMA && (lex_advance(), 1));
 
         expect(TOK_RBRACKET, "expected ']' to close matrix row");
@@ -76,7 +85,51 @@ static ASTNode *parse_matrix_literal(void) {
     return ast_new_matrix_literal(rows, row_count, col_count, line);
 }
 
-/* factor -> ID | matrixLiteral */
+/* One size inside identity(...) / zeros(...): a whole number from 1 up to
+ * MAX_GEN_DIM. */
+#define MAX_GEN_DIM 10000
+#define MAX_GEN_CELLS 10000000L
+
+static int parse_size(const char *what) {
+    Token t = expect(TOK_NUMBER, what);
+    if (strchr(t.text, '.')) {
+        fprintf(stderr, "Parse error at line %d: a size must be a whole number (got '%s')\n",
+                t.line, t.text);
+        exit(1);
+    }
+    long v = strtol(t.text, NULL, 10);
+    if (v < 1 || v > MAX_GEN_DIM) {
+        fprintf(stderr, "Parse error at line %d: a size must be between 1 and %d (got '%s')\n",
+                t.line, MAX_GEN_DIM, t.text);
+        exit(1);
+    }
+    return (int)v;
+}
+
+/* matrixGen -> IDENTITY '(' NUMBER ')' | ZEROS '(' NUMBER ',' NUMBER ')' */
+static ASTNode *parse_matrix_gen(void) {
+    Token kw = lex_advance();
+    expect(TOK_LPAREN, "expected '(' after function name");
+
+    int rows, cols;
+    if (kw.type == TOK_IDENTITY) {
+        rows = cols = parse_size("expected the size n in identity(n)");
+    } else {
+        rows = parse_size("expected the number of rows in zeros(rows, cols)");
+        expect(TOK_COMMA, "expected ',' between the rows and columns in zeros(rows, cols)");
+        cols = parse_size("expected the number of columns in zeros(rows, cols)");
+    }
+    expect(TOK_RPAREN, "expected ')' to close function call");
+
+    if ((long)rows * cols > MAX_GEN_CELLS) {
+        fprintf(stderr, "Parse error at line %d: a %dx%d matrix is too large (limit is %ld elements)\n",
+                kw.line, rows, cols, MAX_GEN_CELLS);
+        exit(1);
+    }
+    return ast_new_matrix_gen(kw.type, rows, cols, kw.line);
+}
+
+/* factor -> ID | matrixLiteral | matrixGen */
 static ASTNode *parse_factor(void) {
     Token t = lex_peek();
     if (t.type == TOK_ID) {
@@ -85,6 +138,9 @@ static ASTNode *parse_factor(void) {
     }
     if (t.type == TOK_LBRACKET) {
         return parse_matrix_literal();
+    }
+    if (t.type == TOK_IDENTITY || t.type == TOK_ZEROS) {
+        return parse_matrix_gen();
     }
     parse_error("expected an identifier or matrix literal", t);
     return NULL; /* unreachable, silences compiler warning */

@@ -8,7 +8,7 @@
  * an INPUT ("input A 2x3") or an OUTPUT ("output C").
  * The right-hand side of an ASSIGN is always an expression node:
  * IDENTIFIER, MATRIX_LITERAL, BINOP (infix add/sub/mul), or FUNC_CALL
- * (add/subtract/multiply/transpose/inverse).
+ * (add/subtract/multiply/transpose/inverse), or MATRIX_GEN (identity/zeros).
  */
 typedef enum {
     NODE_NUMBER,          /* a bare number, e.g. inside a matrix literal */
@@ -16,6 +16,7 @@ typedef enum {
     NODE_IDENTIFIER,      /* A, B, C ... refers to a previously assigned var */
     NODE_BINOP,           /* A + B, A - B, A * B (infix, always 2 operands) */
     NODE_FUNC_CALL,       /* add(A,B,C), multiply(A,B,C,D), transpose(A), inverse(A) */
+    NODE_MATRIX_GEN,      /* identity(3), zeros(2,3): a matrix built from its size alone */
     NODE_ASSIGN,          /* X = <expr> */
     NODE_PRINT,           /* print(X) */
     NODE_INPUT,           /* input A 2x3: a matrix the caller passes in */
@@ -32,7 +33,9 @@ typedef struct ASTNode {
     char name[AST_NAME_MAX];
 
     /* NODE_MATRIX_LITERAL: a rows x cols grid of numbers.
-     * NODE_INPUT: the declared size (values stays NULL). */
+     * NODE_INPUT: the declared size (values stays NULL).
+     * NODE_MATRIX_GEN: the size of the generated matrix (func_kind says
+     * which one: TOK_IDENTITY or TOK_ZEROS; values stays NULL). */
     double **values;
     int rows;
     int cols;
@@ -73,6 +76,7 @@ ASTNode *ast_new_identifier(const char *name, int line);
 ASTNode *ast_new_matrix_literal(double **values, int rows, int cols, int line);
 ASTNode *ast_new_binop(char op, ASTNode *left, ASTNode *right, int line);
 ASTNode *ast_new_func_call(TokenType func_kind, ASTNode **args, int arg_count, int line);
+ASTNode *ast_new_matrix_gen(TokenType kind, int rows, int cols, int line);
 ASTNode *ast_new_assign(const char *target, ASTNode *value, int line);
 ASTNode *ast_new_print(const char *target, int line);
 ASTNode *ast_new_input(const char *name, int rows, int cols, int line);

@@ -28,6 +28,12 @@ static inline Mat mat_from(int r, int c, const double *vals) {
     return m;
 }
 
+static inline Mat mat_identity(int n) {
+    Mat m = mat_new(n, n);
+    for (int i = 0; i < n; i++) m.d[i * n + i] = 1.0;
+    return m;
+}
+
 static inline Mat mat_copy(Mat a) {
     return mat_from(a.r, a.c, a.d);
 }

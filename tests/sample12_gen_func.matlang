@@ -1,0 +1,7 @@
+# a function that uses a negative number, identity and zeros: R = I - A + Z
+input A 2x2
+N = [[-1,0],[0,-1]]
+I = identity(2)
+Z = zeros(2,2)
+R = A * N + I + Z
+output R

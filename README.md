@@ -1,6 +1,6 @@
 # MatrixLang
 
-A small compiler for a domain-specific language built around matrix operations. Built as a Compiler Design course project. Supports declaring matrices, adding, subtracting, multiplying, transposing, inverting, and printing them. Programs compile to plain C, either a standalone program or a function other C code can call, and chains of multiplications are reordered to the cheapest order.
+A small compiler for a domain-specific language built around matrix operations. Built as a Compiler Design course project. Supports declaring matrices (including negative numbers, `identity(n)` and `zeros(r, c)`), adding, subtracting, multiplying, transposing, inverting, and printing them. Programs compile to plain C, either a standalone program or a function other C code can call, and chains of multiplications are reordered to the cheapest order.
 
 ## Example program
 
@@ -12,6 +12,20 @@ D = add(A, B, C)
 E = multiply(A, B, C, D)
 print(E)
 ```
+
+## The language at a glance
+
+```
+A = [[1,-2.5],[-3,4]]        # a matrix literal; numbers may be negative
+I = identity(2)              # 2x2 identity matrix
+Z = zeros(2,3)               # 2x3 matrix of zeros
+B = A * I + A                # infix + - *
+C = multiply(A, I, A)        # or add / subtract / multiply with 2 or more matrices
+D = transpose(A)             # transpose / inverse take one matrix
+print(B)
+```
+
+`identity` and `zeros` take whole numbers from 1 to 10000 (and at most 10 million elements in total). They are keywords, so they cannot be used as variable names. A negative number is written directly inside a matrix literal, as in `[[1,-2.5]]`. There is no unary minus on matrices, so use `subtract(A, B)` or `A - B`.
 
 ## Project structure
 
@@ -32,6 +46,7 @@ matrixLang/
     func_caller.c           calls the generated functions the way a real project would
     sample*.matlang         valid and deliberately broken programs
   Makefile                  make, make test, make run FILE=...
+  LICENSE                   MIT
   matlangc                  one command: compile a .matlang file to C, build it and run it
 ```
 
@@ -52,7 +67,20 @@ Source code goes through these stages, each one buildable and runnable on its ow
 ```
 make test                             # build everything and run all checks
 ./matlangc tests/sample1.matlang      # compile to C, build it, run it
+./matlangc -O0 tests/sample4_chain.matlang   # same, with the optimizer switched off
 ```
+
+## Turning the optimizer off
+
+By default the multiply-chain optimizer runs (`-O1`). Pass `-O0` to skip it, so multiplications are compiled in exactly the order they are written. That is handy for showing the before and after of the optimization:
+
+```
+./matlangc -O0 tests/sample9_chain_func.matlang
+./build/compiler -O0 tests/sample4_chain.matlang out.c
+make run FILE=tests/sample4_chain.matlang OPT=-O0
+```
+
+`tac_test` and `interp_test` take the same flag. In the web page the Optimizer box in the top bar does the same thing.
 
 ## Building and running
 
@@ -142,6 +170,6 @@ Rules:
 
 ## Status
 
-Working: lexer, parser, AST, semantic analysis with symbol table, matrix chain multiplication optimizer, three-address code generation, an interpreter that performs real matrix arithmetic including inversion via Gauss-Jordan elimination, and C code generation (standalone program or callable function) with a loop-tiled multiply.
+Working: lexer, parser, AST, semantic analysis with symbol table, negative numbers in matrix literals, `identity` and `zeros`, an `-O0` switch for the optimizer, matrix chain multiplication optimizer, three-address code generation, an interpreter that performs real matrix arithmetic including inversion via Gauss-Jordan elimination, and C code generation (standalone program or callable function) with a loop-tiled multiply.
 
-`make test` checks that compiled output matches the interpreter, that the generated functions return correct, freshly allocated results, and that the broken samples are rejected.
+`make test` checks that compiled output matches the interpreter (with the optimizer on and off), that the generated functions return correct, freshly allocated results, and that the broken samples are rejected.

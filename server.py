@@ -65,7 +65,7 @@ def error_line(text):
     return int(m.group(1)) if m else None
 
 
-def run_pipeline(code):
+def run_pipeline(code, optimize=True):
     started = time.time()
     if not code.strip():
         return {"ok": False, "error": "Write a program first."}
@@ -80,7 +80,8 @@ def run_pipeline(code):
         with open(src, "w") as f:
             f.write(code if code.endswith("\n") else code + "\n")
 
-        rc, out, err = run([COMPILER, src, c_path, FUNC_NAME])
+        flag = [] if optimize else ["-O0"]
+        rc, out, err = run([COMPILER] + flag + [src, c_path, FUNC_NAME])
         if rc != 0:
             msg = (err or out).strip() or "The compiler stopped without a message."
             if rc < 0:
@@ -94,7 +95,7 @@ def run_pipeline(code):
             with open(h_path) as f:
                 header = f.read()
 
-        rc, out, err = run([TAC_TOOL, src])
+        rc, out, err = run([TAC_TOOL] + flag + [src])
         tac = out.split("\n\n", 1)[1] if out.startswith("Three-address code:") and "\n\n" in out else out
         tac = tac.strip("\n")
 
@@ -106,6 +107,9 @@ def run_pipeline(code):
             before_part, _, chain_part = head.partition("=== chains ===")
             before = before_part.replace("=== before ===", "").strip("\n")
             after = tail.strip("\n")
+            if not optimize:
+                after = before      # nothing was rewritten
+                chain_part = ""     # and no multiplication order was chosen
             for ln in chain_part.splitlines():
                 f = ln.split("\t")
                 if len(f) != 7 or f[0] != "CHAIN":
@@ -119,7 +123,7 @@ def run_pipeline(code):
                                "written": f[3], "written_cost": int(f[4]),
                                "best": f[5], "best_cost": int(f[6])})
 
-        result = {"ok": True, "mode": "function" if header else "program",
+        result = {"ok": True, "optimized": optimize, "mode": "function" if header else "program",
                   "c": c_code, "header": header, "tac": tac,
                   "before": before, "after": after, "chains": chains, "output": None}
 
@@ -203,12 +207,14 @@ class Handler(BaseHTTPRequestHandler):
         if length <= 0 or length > MAX_BODY:
             return self._json(413, {"ok": False, "error": "request too large"})
         try:
-            code = json.loads(self.rfile.read(length).decode("utf-8")).get("code", "")
+            body = json.loads(self.rfile.read(length).decode("utf-8"))
+            code = body.get("code", "")
+            optimize = body.get("optimize", True)
         except (ValueError, AttributeError):
             return self._json(400, {"ok": False, "error": "bad request"})
-        if not isinstance(code, str):
+        if not isinstance(code, str) or not isinstance(optimize, bool):
             return self._json(400, {"ok": False, "error": "bad request"})
-        self._json(200, run_pipeline(code))
+        self._json(200, run_pipeline(code, optimize))
 
 
 def main():

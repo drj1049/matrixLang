@@ -11,6 +11,7 @@
  *
  * Forms produced:
  *   t = LOADMATRIX RxC              (materializes a matrix literal)
+ *   t = identity(n) / t = zeros(r, c)
  *   t = a op b                      (op is '+', '-', '*')
  *   t = func(a1, a2, ..., an)       (func is add/subtract/multiply/transpose/inverse)
  *   t = a                           (plain copy, e.g. X = Y or X = t3)
@@ -20,6 +21,7 @@
  */
 typedef enum {
     TAC_LOAD_MATRIX,
+    TAC_GEN,
     TAC_BINOP,
     TAC_CALL,
     TAC_COPY,
@@ -44,7 +46,8 @@ typedef struct {
     char binop;                  /* '+', '-', '*' */
 
     /* TAC_CALL */
-    char func_name[16];          /* "add", "subtract", "multiply", "transpose", "inverse" */
+    char func_name[16];          /* "add", "subtract", "multiply", "transpose", "inverse"
+                                    (TAC_GEN: "identity", "zeros") */
     char call_args[TAC_MAX_CALL_ARGS][TAC_NAME_MAX];
     int call_arg_count;
 
@@ -52,7 +55,9 @@ typedef struct {
     char src[TAC_NAME_MAX];
     int src_is_temp;             /* TAC_COPY: src is a temporary nothing else reads */
 
-    /* TAC_LOAD_MATRIX; also the size of a TAC_INPUT / TAC_OUTPUT matrix */
+    /* TAC_GEN uses func_name ("identity" or "zeros") and rows / cols below */
+
+    /* TAC_LOAD_MATRIX; also the size of a TAC_GEN / TAC_INPUT / TAC_OUTPUT matrix */
     int rows;
     int cols;
     double **matrix_values;      /* owned deep copy of the literal's numbers */

@@ -5,6 +5,7 @@
  */
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "../src/semantic.h"
 #include "../src/optimizer.h"
 #include "../src/tac.h"
@@ -24,15 +25,23 @@ static char *read_file(const char *path) {
 }
 
 int main(int argc, char **argv) {
-    if (argc < 2) {
-        fprintf(stderr, "usage: %s <file.matlang>\n", argv[0]);
+    int optimize = 1;
+    const char *path = NULL;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-O0") == 0) optimize = 0;
+        else if (strcmp(argv[i], "-O1") == 0) optimize = 1;
+        else if (!path) path = argv[i];
+        else path = NULL, i = argc;   /* a second file name: show the usage */
+    }
+    if (!path) {
+        fprintf(stderr, "usage: %s [-O0|-O1] <file.matlang>\n", argv[0]);
         return 1;
     }
 
-    char *source = read_file(argv[1]);
+    char *source = read_file(path);
     Program prog = parse_program(source);
     semantic_check(&prog);
-    optimize_program(&prog);
+    if (optimize) optimize_program(&prog);
     TACProgram tac = tac_generate(&prog);
 
     interp_run(&tac);

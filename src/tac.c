@@ -26,6 +26,8 @@ static const char *func_name_for(TokenType t) {
         case TOK_MULTIPLY:  return "multiply";
         case TOK_TRANSPOSE: return "transpose";
         case TOK_INVERSE:   return "inverse";
+        case TOK_IDENTITY:  return "identity";
+        case TOK_ZEROS:     return "zeros";
         default:            return "?";
     }
 }
@@ -59,6 +61,20 @@ static void gen_expr(ASTNode *node, char *out) {
                 ins->matrix_values[r] = malloc(sizeof(double) * node->cols);
                 memcpy(ins->matrix_values[r], node->values[r], sizeof(double) * node->cols);
             }
+            strncpy(out, t, TAC_NAME_MAX - 1);
+            break;
+        }
+
+        case NODE_MATRIX_GEN: {
+            char t[TAC_NAME_MAX];
+            new_temp(t);
+            TACInstr *ins = tac_emit();
+            ins->op = TAC_GEN;
+            ins->line = node->line;
+            strncpy(ins->result, t, TAC_NAME_MAX - 1);
+            strncpy(ins->func_name, func_name_for(node->func_kind), sizeof(ins->func_name) - 1);
+            ins->rows = node->rows;
+            ins->cols = node->cols;
             strncpy(out, t, TAC_NAME_MAX - 1);
             break;
         }
@@ -166,6 +182,12 @@ void tac_print(const TACProgram *tac) {
         switch (ins->op) {
             case TAC_LOAD_MATRIX:
                 printf("%-4s = LOADMATRIX %dx%d\n", ins->result, ins->rows, ins->cols);
+                break;
+            case TAC_GEN:
+                if (strcmp(ins->func_name, "identity") == 0)
+                    printf("%-4s = identity(%d)\n", ins->result, ins->rows);
+                else
+                    printf("%-4s = zeros(%d, %d)\n", ins->result, ins->rows, ins->cols);
                 break;
             case TAC_BINOP:
                 printf("%-4s = %s %c %s\n", ins->result, ins->arg1, ins->binop, ins->arg2);

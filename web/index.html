@@ -82,6 +82,8 @@
   .col pre { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 10px; overflow: auto; }
   .opt-h { margin: 0 0 10px; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 600; }
   .chain { border: 1px solid var(--border); background: var(--panel-2); border-radius: 10px; padding: 12px 14px; margin: 0 0 12px; }
+  .opt-toggle { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
+  .opt-toggle input { accent-color: var(--accent); cursor: pointer; }
   .chain-top { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
   .chain-line { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
   .chain-ops { font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
@@ -124,6 +126,7 @@
   <span class="spacer"></span>
   <label class="sub" for="samples">Sample</label>
   <select id="samples" aria-label="Load a sample program"></select>
+  <label class="sub opt-toggle" for="optimize" title="Turn the multiplication-order optimizer off to compile exactly what you wrote"><input type="checkbox" id="optimize" checked> Optimizer</label>
   <button id="theme" type="button" aria-label="Switch between dark and light theme">Light</button>
   <button id="run" class="primary" type="button">Run <span class="mono" style="opacity:.7;font-weight:400">&#8984;&#9166;</span></button>
 </header>
@@ -363,33 +366,35 @@
 
     // Optimizer
     var same = d.before === d.after;
+    var off = d.optimized === false;
     var optNodes = [];
     if (d.chains && d.chains.length) {
       optNodes.push(el("h3", "opt-h", "Multiplication order"));
       d.chains.forEach(function (c) { optNodes.push(chainCard(c)); });
     }
     optNodes.push(el("h3", "opt-h", "Tree before and after"));
-    if (same) optNodes.push(el("p", "note", "Nothing to reorder here: the optimizer only changes chains of three or more multiplications, and this tree is already in the cheapest order."));
+    if (off) optNodes.push(el("p", "note", "The optimizer is switched off, so the multiplications are compiled in exactly the order you wrote them. Tick Optimizer and Run again to see what it would change."));
+    else if (same) optNodes.push(el("p", "note", "Nothing to reorder here: the optimizer only changes chains of three or more multiplications, and this tree is already in the cheapest order."));
     else optNodes.push(el("p", "note", "Highlighted lines are what the optimizer changed. It picks the order that needs the fewest multiplications."));
     var df = same ? { del: {}, add: {} } : diffLines(d.before.split("\n"), d.after.split("\n"));
     var cols = el("div", "cols");
-    var c1 = el("div", "col"); c1.appendChild(el("h3", null, "Before")); c1.appendChild(diffPre(d.before, df.del, "del"));
+    var c1 = el("div", "col"); c1.appendChild(el("h3", null, off ? "Tree (as written)" : "Before")); c1.appendChild(diffPre(d.before, df.del, "del"));
     var c2 = el("div", "col after"); c2.appendChild(el("h3", null, same ? "After (unchanged)" : "After")); c2.appendChild(diffPre(d.after, df.add, "add"));
-    cols.appendChild(c1); cols.appendChild(c2); optNodes.push(cols);
+    cols.appendChild(c1); if (!off) cols.appendChild(c2); optNodes.push(cols);
     fill("#panel-opt", optNodes);
 
     var kind = d.mode === "function" ? "function" : "program";
     statusEl.textContent = "";
     var line = el("span", null);
     line.appendChild(el("span", "ok", "Compiled"));
-    line.appendChild(document.createTextNode(" as a C " + kind + " in " + d.ms + " ms" + (same ? "" : " · optimizer rewrote a multiply chain")));
+    line.appendChild(document.createTextNode(" as a C " + kind + " in " + d.ms + " ms" + (off ? " · optimizer off" : same ? "" : " · optimizer rewrote a multiply chain")));
     statusEl.appendChild(line);
   }
 
   /* ---------- run ---------- */
   function run() {
     runBtn.disabled = true; statusEl.textContent = "Compiling…";
-    fetch("/api/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: editor.value }) })
+    fetch("/api/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: editor.value, optimize: $("#optimize").checked }) })
       .then(function (r) { return r.json(); })
       .then(render)
       .catch(function () { showError("Cannot reach the server. Start it with:  python3 server.py", null); })

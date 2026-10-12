@@ -24,6 +24,14 @@ ASTNode *ast_new_matrix_literal(double **values, int rows, int cols, int line) {
     return n;
 }
 
+ASTNode *ast_new_matrix_gen(TokenType kind, int rows, int cols, int line) {
+    ASTNode *n = ast_alloc(NODE_MATRIX_GEN, line);
+    n->func_kind = kind;
+    n->rows = rows;
+    n->cols = cols;
+    return n;
+}
+
 ASTNode *ast_new_binop(char op, ASTNode *left, ASTNode *right, int line) {
     ASTNode *n = ast_alloc(NODE_BINOP, line);
     n->op = op;
@@ -86,7 +94,7 @@ void ast_free(ASTNode *node) {
             ast_free(node->value);
             break;
         default:
-            break; /* NODE_NUMBER, NODE_IDENTIFIER, NODE_PRINT, NODE_INPUT, NODE_OUTPUT own no children */
+            break; /* NODE_NUMBER, NODE_IDENTIFIER, NODE_MATRIX_GEN, NODE_PRINT, NODE_INPUT, NODE_OUTPUT own no children */
     }
     free(node);
 }
@@ -102,6 +110,8 @@ static const char *func_kind_name(TokenType t) {
         case TOK_MULTIPLY:  return "multiply";
         case TOK_TRANSPOSE: return "transpose";
         case TOK_INVERSE:   return "inverse";
+        case TOK_IDENTITY:  return "identity";
+        case TOK_ZEROS:     return "zeros";
         default:            return "?";
     }
 }
@@ -126,6 +136,10 @@ void ast_print(const ASTNode *node, int indent) {
                 }
                 printf("\n");
             }
+            break;
+
+        case NODE_MATRIX_GEN:
+            printf("MatrixGen(%s, %dx%d)\n", func_kind_name(node->func_kind), node->rows, node->cols);
             break;
 
         case NODE_BINOP:

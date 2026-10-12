@@ -1,5 +1,5 @@
-/* Calls the functions generated from sample5_func.matlang and
- * sample6_alias.matlang the way a real project would: through the
+/* Calls the functions generated from sample5_func.matlang,
+ * sample6_alias.matlang and sample12_gen_func.matlang the way a real project would: through the
  * generated headers, many times, with its own arrays.
  * usage: func_caller            check the results
  *        func_caller badsize    pass a wrong-sized matrix (must exit 1)
@@ -8,6 +8,7 @@
 #include <math.h>
 #include "sample5_func.h"
 #include "sample6_alias.h"
+#include "sample12_gen_func.h"
 
 int main(int argc, char **argv) {
     double a[] = {1, 2, 3, 4, 5, 6};
@@ -47,6 +48,18 @@ int main(int argc, char **argv) {
         if (copy.d[i] != c[i]) { printf("alias_copy returned wrong values\n"); return 1; }
     }
     mat_free(copy); /* would crash if it pointed at the stack array c */
+
+    /* gen_func computes I - A with a negative literal, identity and zeros */
+    Mat G = gen_func(C);
+    double want_g[] = {0, -2, -3, -3};
+    if (G.r != 2 || G.c != 2) { printf("gen_func returned the wrong size\n"); return 1; }
+    for (int i = 0; i < 4; i++) {
+        if (G.d[i] != want_g[i]) {
+            printf("gen_func wrong value at %d: got %g, want %g\n", i, G.d[i], want_g[i]);
+            return 1;
+        }
+    }
+    mat_free(G);
 
     return 0;
 }

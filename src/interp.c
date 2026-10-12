@@ -223,6 +223,15 @@ void interp_run(const TACProgram *tac) {
                 env_set(&env, ins->result, &v);
                 break;
             }
+            case TAC_GEN: {
+                Value v = make_value(ins->rows, ins->cols);   /* starts as all zeros */
+                if (strcmp(ins->func_name, "identity") == 0) {
+                    for (int d = 0; d < ins->rows; d++) v.data[d][d] = 1.0;
+                }
+                env_set(&env, ins->result, &v);
+                free_value(&v);
+                break;
+            }
             case TAC_BINOP: {
                 Value *a = env_get(&env, ins->arg1);
                 Value *b = env_get(&env, ins->arg2);
