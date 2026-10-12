@@ -92,6 +92,16 @@ Note the `-lm` flag on the last one, it links the math library, required since t
 
 To see error handling in action, run any of the above against `tests/sample2_bad.matlang` instead. It contains a dimension mismatch and should exit with a semantic error and line number instead of crashing.
 
+## Web page
+
+A small local page for trying programs without the terminal. It shows the program output, the generated C, the three-address code, and the optimizer's tree before and after.
+
+```
+python3 server.py        # or: make ui
+```
+
+Then open http://localhost:8000. Pick a sample or type your own program and press Run (Cmd+Enter). The server only listens on your own computer, and needs Python 3, gcc and make. Programs with `input`/`output` show the generated function and header instead of running.
+
 ## Compiling to a callable C function
 
 A program that declares its matrices with `input` and names a result with `output` compiles to a C function instead of a standalone program:

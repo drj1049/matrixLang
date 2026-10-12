@@ -12,7 +12,7 @@ BINS   = build/compiler $(STAGES:%=build/%_test)
 GOOD = sample1 sample4_chain
 BAD  = sample2_bad sample3_undefined sample7_bad_input sample8_bad_output
 
-.PHONY: all test run clean
+.PHONY: all test run ui clean
 
 all: $(BINS)
 
@@ -74,6 +74,10 @@ test: all
 			echo "PASS $$s (rejected: $$(cat build/$$s.err.txt))"; \
 		fi; \
 	done
+
+# local web page: make ui, then open http://localhost:8000
+ui: build/compiler build/tac_test build/optimizer_prog_test
+	python3 server.py
 
 clean:
 	rm -rf build

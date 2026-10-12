@@ -1,0 +1,440 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MatrixLang Playground</title>
+<link rel="icon" href="data:,">
+<style>
+  :root {
+    --bg: #0f1115; --panel: #161a21; --panel-2: #1b2029; --border: #29303b;
+    --text: #e6e9ef; --muted: #8b94a3; --accent: #6ea8fe; --accent-ink: #0b1220;
+    --ok: #5fd38d; --add-bg: rgba(95,211,141,.16); --err: #ff6b6b; --err-bg: rgba(255,107,107,.14); --code-bg: #12151b;
+  }
+  [data-theme="light"] {
+    --bg: #f4f5f7; --panel: #ffffff; --panel-2: #f0f2f5; --border: #d9dde3;
+    --text: #1b1f27; --muted: #5d6675; --accent: #1f6feb; --accent-ink: #ffffff;
+    --ok: #1a7f46; --add-bg: rgba(26,127,70,.12); --err: #c62828; --err-bg: rgba(198,40,40,.10); --code-bg: #fbfbfc;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    display: flex; flex-direction: column;
+  }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+  header {
+    display: flex; align-items: center; gap: 12px; padding: 10px 16px;
+    border-bottom: 1px solid var(--border); background: var(--panel); flex-wrap: wrap;
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 650; letter-spacing: .2px; }
+  header .sub { color: var(--muted); font-size: 12.5px; }
+  .spacer { flex: 1; }
+  select, button {
+    font: inherit; color: var(--text); background: var(--panel-2);
+    border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; cursor: pointer;
+  }
+  select:hover, button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 650; padding: 6px 16px; }
+  button.primary:hover { filter: brightness(1.08); }
+  button:disabled { opacity: .6; cursor: progress; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  main {
+    flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+    gap: 12px; padding: 12px 16px 16px;
+  }
+  @media (max-width: 860px) { main { grid-template-columns: 1fr; grid-auto-rows: minmax(360px, 1fr); overflow: auto; } }
+  .pane { display: flex; flex-direction: column; min-height: 0; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  .pane-title { padding: 8px 12px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; }
+
+  /* editor */
+  .editor { position: relative; flex: 1; min-height: 0; display: flex; background: var(--code-bg); overflow: hidden; }
+  #gutter { width: 44px; flex: none; padding: 12px 8px 12px 0; text-align: right; color: var(--muted); user-select: none; overflow: hidden; border-right: 1px solid var(--border); font-size: 13px; line-height: 20px; }
+  #gutter div.err { color: var(--err); font-weight: 700; }
+  #code { flex: 1; min-width: 0; resize: none; border: 0; outline: 0; background: transparent; color: var(--text); padding: 12px; font-size: 13px; line-height: 20px; white-space: pre; overflow: auto; tab-size: 2; }
+  #errbar { position: absolute; left: 0; right: 0; height: 20px; background: var(--err-bg); pointer-events: none; display: none; border-left: 3px solid var(--err); }
+  .statusbar { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-top: 1px solid var(--border); font-size: 12.5px; color: var(--muted); min-height: 36px; }
+  .statusbar .ok { color: var(--ok); }
+  #error { display: none; margin: 0; padding: 10px 12px; border-top: 1px solid var(--err); background: var(--err-bg); color: var(--err); white-space: pre-wrap; font-size: 13px; }
+
+  /* tabs */
+  .tabs { display: flex; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--border); background: var(--panel); }
+  .tab { border: 0; border-radius: 8px 8px 0 0; background: transparent; color: var(--muted); padding: 8px 14px; border-bottom: 2px solid transparent; }
+  .tab:hover { color: var(--text); border-color: transparent; }
+  .tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); background: var(--panel-2); }
+  .tabs .spacer { flex: 1; }
+  .copy { align-self: center; margin-bottom: 4px; padding: 3px 10px; font-size: 12px; }
+  .panels { flex: 1; min-height: 0; position: relative; background: var(--code-bg); }
+  .panel { position: absolute; inset: 0; overflow: auto; padding: 14px; display: none; }
+  .panel.active { display: block; }
+  pre { margin: 0; white-space: pre; font-size: 13px; line-height: 1.5; }
+  .empty { color: var(--muted); }
+  .note { color: var(--muted); margin: 0 0 12px; white-space: normal; }
+  .sig { display: inline-block; margin: 4px 0 0; padding: 8px 12px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; color: var(--accent); }
+  .file-title { color: var(--muted); font-size: 12px; margin: 0 0 6px; }
+  .file-title:not(:first-child) { margin-top: 18px; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .col h3 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+  .col.after h3 { color: var(--ok); }
+  .col pre { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 10px; overflow: auto; }
+  .opt-h { margin: 0 0 10px; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 600; }
+  .chain { border: 1px solid var(--border); background: var(--panel-2); border-radius: 10px; padding: 12px 14px; margin: 0 0 12px; }
+  .chain-top { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+  .chain-line { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+  .chain-ops { font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+  .chain-dims { color: var(--muted); font-size: 12px; margin: 4px 0 10px; white-space: pre-wrap; }
+  .chain-row { display: grid; grid-template-columns: 84px 1fr auto; gap: 10px; align-items: baseline; padding: 4px 0; }
+  .chain-label { color: var(--muted); font-size: 12.5px; }
+  .chain-order { font-size: 13px; overflow-wrap: anywhere; }
+  .chain-order.good { color: var(--ok); }
+  .chain-cost { color: var(--muted); font-size: 12.5px; white-space: nowrap; }
+  .chain-save { margin-top: 6px; color: var(--ok); font-size: 13px; font-weight: 600; }
+  .chain-save.same { color: var(--muted); font-weight: 400; }
+  @media (max-width: 600px) { .chain-row { grid-template-columns: 1fr; gap: 2px; } }
+  .mat-block { margin: 0 0 22px; }
+  .mat-head { display: flex; align-items: baseline; gap: 10px; margin: 0 0 8px; }
+  .mat-name { font-size: 15px; font-weight: 650; }
+  .mat-dim { color: var(--muted); font-size: 12.5px; }
+  .mat { position: relative; display: inline-grid; gap: 6px 22px; padding: 10px 20px; font-size: 14px; font-variant-numeric: tabular-nums; }
+  .mat::before, .mat::after { content: ""; position: absolute; top: 0; bottom: 0; width: 9px; border: 2px solid var(--text); }
+  .mat::before { left: 0; border-right: 0; }
+  .mat::after { right: 0; border-left: 0; }
+  .mat .cell { text-align: right; }
+  details.raw { margin-top: 6px; color: var(--muted); }
+  details.raw summary { cursor: pointer; font-size: 12.5px; }
+  details.raw pre { margin-top: 8px; }
+  .dl { display: block; min-height: 1.5em; margin: 0 -10px; padding: 0 10px; }
+  .dl.del { background: var(--err-bg); }
+  .dl.add { background: var(--add-bg); }
+  @media (max-width: 1100px) { .cols { grid-template-columns: 1fr; } }
+  @media (max-width: 600px) {
+    header label.sub { display: none; }
+    .tabs { overflow-x: auto; padding-left: 4px; padding-right: 4px; }
+    .tab { padding: 8px 9px; white-space: nowrap; }
+    .copy { flex: none; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>MatrixLang</h1><span class="sub">compiler playground</span>
+  <span class="spacer"></span>
+  <label class="sub" for="samples">Sample</label>
+  <select id="samples" aria-label="Load a sample program"></select>
+  <button id="theme" type="button" aria-label="Switch between dark and light theme">Light</button>
+  <button id="run" class="primary" type="button">Run <span class="mono" style="opacity:.7;font-weight:400">&#8984;&#9166;</span></button>
+</header>
+
+<main>
+  <section class="pane" aria-label="Source code">
+    <div class="pane-title">Program</div>
+    <div class="editor">
+      <div id="gutter" class="mono" aria-hidden="true"></div>
+      <div id="errbar" aria-hidden="true"></div>
+      <textarea id="code" class="mono" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" wrap="off" aria-label="MatrixLang source code"></textarea>
+    </div>
+    <pre id="error" class="mono" role="alert"></pre>
+    <div class="statusbar" id="status">Ready</div>
+  </section>
+
+  <section class="pane" aria-label="Results">
+    <div class="tabs" role="tablist" aria-label="Compiler stages">
+      <button class="tab" role="tab" id="tab-output" aria-controls="panel-output" aria-selected="true" data-panel="output">Output</button>
+      <button class="tab" role="tab" id="tab-c" aria-controls="panel-c" aria-selected="false" data-panel="c">Generated C</button>
+      <button class="tab" role="tab" id="tab-tac" aria-controls="panel-tac" aria-selected="false" data-panel="tac">TAC</button>
+      <button class="tab" role="tab" id="tab-opt" aria-controls="panel-opt" aria-selected="false" data-panel="opt">Optimizer</button>
+      <span class="spacer"></span>
+      <button class="copy" id="copy" type="button">Copy</button>
+    </div>
+    <div class="panels">
+      <div class="panel active" id="panel-output" role="tabpanel" aria-labelledby="tab-output"><span class="empty">Press Run to compile and run your program.</span></div>
+      <div class="panel" id="panel-c" role="tabpanel" aria-labelledby="tab-c"><span class="empty">The C code your compiler writes will appear here.</span></div>
+      <div class="panel" id="panel-tac" role="tabpanel" aria-labelledby="tab-tac"><span class="empty">The three-address code will appear here.</span></div>
+      <div class="panel" id="panel-opt" role="tabpanel" aria-labelledby="tab-opt"><span class="empty">The tree before and after the optimizer will appear here.</span></div>
+    </div>
+  </section>
+</main>
+
+<script>
+(function () {
+  "use strict";
+  var LH = 20, PAD = 12;
+  var $ = function (s) { return document.querySelector(s); };
+  var editor = $("#code"), gutter = $("#gutter"), errbar = $("#errbar");
+  var errBox = $("#error"), statusEl = $("#status"), runBtn = $("#run");
+  var samplesEl = $("#samples");
+  var errLine = null, last = null, active = "output";
+
+  function store(key, val) { try { if (val === undefined) return localStorage.getItem(key); localStorage.setItem(key, val); } catch (e) {} return null; }
+
+  /* ---------- editor ---------- */
+  function renderGutter() {
+    var n = editor.value.split("\n").length;
+    gutter.textContent = "";
+    for (var i = 1; i <= n; i++) {
+      var d = document.createElement("div");
+      d.textContent = i;
+      if (i === errLine) d.className = "err";
+      gutter.appendChild(d);
+    }
+    syncScroll();
+  }
+  function syncScroll() {
+    gutter.scrollTop = editor.scrollTop;
+    if (errLine == null) { errbar.style.display = "none"; return; }
+    errbar.style.display = "block";
+    errbar.style.top = (PAD + (errLine - 1) * LH - editor.scrollTop) + "px";
+  }
+  editor.addEventListener("input", function () { errLine = null; renderGutter(); store("matlang.code", editor.value); });
+  editor.addEventListener("scroll", syncScroll);
+  editor.addEventListener("keydown", function (e) {
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); run(); return; }
+    if (e.key === "Tab" && !e.shiftKey) {
+      e.preventDefault();
+      var s = editor.selectionStart, t = editor.selectionEnd;
+      editor.value = editor.value.slice(0, s) + "  " + editor.value.slice(t);
+      editor.selectionStart = editor.selectionEnd = s + 2;
+      editor.dispatchEvent(new Event("input"));
+    }
+  });
+  function setCode(code) { editor.value = code; errLine = null; hideError(); renderGutter(); store("matlang.code", code); }
+
+  /* ---------- messages ---------- */
+  function showError(msg, line) {
+    errBox.textContent = msg; errBox.style.display = "block";
+    errLine = line || null; renderGutter();
+    statusEl.textContent = line ? "Stopped at line " + line : "Stopped";
+  }
+  function hideError() { errBox.style.display = "none"; errBox.textContent = ""; }
+
+  /* ---------- tabs ---------- */
+  function selectTab(name) {
+    active = name;
+    document.querySelectorAll(".tab").forEach(function (b) {
+      b.setAttribute("aria-selected", b.dataset.panel === name ? "true" : "false");
+    });
+    document.querySelectorAll(".panel").forEach(function (p) {
+      p.classList.toggle("active", p.id === "panel-" + name);
+    });
+  }
+  document.querySelectorAll(".tab").forEach(function (b) {
+    b.addEventListener("click", function () { selectTab(b.dataset.panel); });
+    b.addEventListener("keydown", function (e) {
+      var tabs = Array.prototype.slice.call(document.querySelectorAll(".tab"));
+      var i = tabs.indexOf(b);
+      if (e.key === "ArrowRight") { tabs[(i + 1) % tabs.length].focus(); tabs[(i + 1) % tabs.length].click(); }
+      if (e.key === "ArrowLeft") { tabs[(i + tabs.length - 1) % tabs.length].focus(); tabs[(i + tabs.length - 1) % tabs.length].click(); }
+    });
+  });
+
+  function el(tag, cls, text) { var n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
+  function pre(text) { return el("pre", "mono", text); }
+  /* "(A x (B x C))" -> "A × (B × C)" */
+  function pretty(t) {
+    var inner = t;
+    if (t.charAt(0) === "(" && t.charAt(t.length - 1) === ")") {
+      var depth = 0, wrapped = true;
+      for (var i = 0; i < t.length; i++) {
+        if (t.charAt(i) === "(") depth++;
+        else if (t.charAt(i) === ")") { depth--; if (depth === 0 && i < t.length - 1) { wrapped = false; break; } }
+      }
+      if (wrapped) inner = t.slice(1, -1);
+    }
+    return inner.replace(/ x /g, " × ");
+  }
+  function chainCard(c) {
+    var box = el("div", "chain");
+    var top = el("div", "chain-top");
+    top.appendChild(el("span", "chain-line", "Line " + c.line));
+    top.appendChild(el("span", "chain-ops mono", c.operands.map(function (o) { return o.name; }).join(" × ")));
+    box.appendChild(top);
+    box.appendChild(el("div", "chain-dims mono", c.operands.map(function (o) { return o.name + " " + o.rows + "×" + o.cols; }).join("   ")));
+    function row(name, text, cost, good) {
+      var r = el("div", "chain-row");
+      r.appendChild(el("span", "chain-label", name));
+      r.appendChild(el("span", "chain-order mono" + (good ? " good" : ""), pretty(text)));
+      r.appendChild(el("span", "chain-cost", cost + (cost === 1 ? " multiplication" : " multiplications")));
+      return r;
+    }
+    box.appendChild(row("As written", c.written, c.written_cost, false));
+    box.appendChild(row("Best order", c.best, c.best_cost, true));
+    var better = c.best_cost < c.written_cost;
+    var saved = c.written_cost - c.best_cost;
+    box.appendChild(el("div", "chain-save" + (better ? "" : " same"),
+      better ? "Saves " + saved + " multiplications (" + Math.round(100 * saved / c.written_cost) + "% fewer)"
+             : (c.written === c.best ? "Already in the cheapest order." : "Another order costs the same, so it makes no difference.")));
+    return box;
+  }
+
+  /* turn the program's printed text ("D =" followed by rows of numbers) into drawn matrices */
+  function matrixBlocks(text) {
+    var blocks = text.split(/\n\s*\n/), mats = [], ok = true;
+    blocks.forEach(function (blk) {
+      var lines = blk.split("\n").filter(function (l) { return l.trim() !== ""; });
+      if (!lines.length) return;
+      var m = lines[0].match(/^(\S+) =$/);
+      var rows = lines.slice(1).map(function (l) { return l.trim().split(/\s+/); });
+      var width = rows.length ? rows[0].length : 0;
+      var numeric = rows.every(function (r) {
+        return r.length === width && r.every(function (v) { return /^-?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$|^-?(inf|nan)$/i.test(v); });
+      });
+      if (!m || !rows.length || !numeric) { ok = false; return; }
+      mats.push({ name: m[1], rows: rows, cols: width });
+    });
+    if (!ok || !mats.length) return [pre(text)];
+    var nodes = mats.map(function (mt) {
+      var box = el("div", "mat-block");
+      var head = el("div", "mat-head");
+      head.appendChild(el("span", "mat-name mono", mt.name));
+      head.appendChild(el("span", "mat-dim", mt.rows.length + (mt.rows.length === 1 ? " row" : " rows") + " × " + mt.cols + (mt.cols === 1 ? " column" : " columns")));
+      var grid = el("div", "mat mono");
+      grid.style.gridTemplateColumns = "repeat(" + mt.cols + ", auto)";
+      mt.rows.forEach(function (r) { r.forEach(function (v) { grid.appendChild(el("span", "cell", v)); }); });
+      box.appendChild(head); box.appendChild(grid);
+      return box;
+    });
+    var raw = el("details", "raw"); raw.appendChild(el("summary", null, "Raw text"));
+    raw.appendChild(pre(text)); nodes.push(raw);
+    return nodes;
+  }
+
+  /* line diff (longest common subsequence): which lines were removed / added */
+  function diffLines(a, b) {
+    var n = a.length, m = b.length, del = {}, add = {};
+    if (n * m > 4000000) return { del: del, add: add };
+    var w = m + 1, t = new Uint16Array((n + 1) * w), i, j;
+    for (i = n - 1; i >= 0; i--) for (j = m - 1; j >= 0; j--)
+      t[i * w + j] = a[i] === b[j] ? t[(i + 1) * w + j + 1] + 1 : Math.max(t[(i + 1) * w + j], t[i * w + j + 1]);
+    i = 0; j = 0;
+    while (i < n && j < m) {
+      if (a[i] === b[j]) { i++; j++; }
+      else if (t[(i + 1) * w + j] >= t[i * w + j + 1]) { del[i++] = true; }
+      else { add[j++] = true; }
+    }
+    while (i < n) del[i++] = true;
+    while (j < m) add[j++] = true;
+    return { del: del, add: add };
+  }
+  function diffPre(text, marks, cls) {
+    var p = el("pre", "mono");
+    text.split("\n").forEach(function (ln, k) {
+      p.appendChild(el("span", "dl" + (marks[k] ? " " + cls : ""), ln === "" ? String.fromCharCode(8203) : ln));
+    });
+    return p;
+  }
+  function fill(id, nodes) { var p = $(id); p.textContent = ""; nodes.forEach(function (n) { p.appendChild(n); }); }
+
+  /* ---------- results ---------- */
+  function render(d) {
+    last = d;
+    if (!d.ok) {
+      showError(d.error || "Something went wrong.", d.line);
+      ["#panel-output", "#panel-c", "#panel-tac", "#panel-opt"].forEach(function (id) {
+        fill(id, [el("span", "empty", "Nothing to show: the program did not compile. See the message under the editor.")]);
+      });
+      return;
+    }
+    hideError(); errLine = null; renderGutter();
+
+    // Output
+    if (d.mode === "function") {
+      var sig = (d.header.match(/^Mat .*;$/m) || [""])[0];
+      var nodes = [el("p", "note", "This program has input and output lines, so it compiles to a C function instead of a program. There is nothing to run here. Copy the generated files into a C project and call it.")];
+      if (sig) { var s = el("span", "sig mono", sig); nodes.push(s); }
+      fill("#panel-output", nodes);
+    } else {
+      var o = d.output ? matrixBlocks(d.output) : [pre("(the program printed nothing)")];
+      if (!d.output) o[0].className = "mono empty";
+      if (d.run_error) { var e = pre(d.run_error); e.style.color = "var(--err)"; e.style.marginTop = "12px"; o.push(e); }
+      fill("#panel-output", o);
+    }
+
+    // Generated C (header first for functions)
+    var cNodes = [];
+    if (d.header) { cNodes.push(el("p", "file-title mono", "matlang_compute.h")); cNodes.push(pre(d.header)); cNodes.push(el("p", "file-title mono", "matlang_compute.c")); }
+    cNodes.push(pre(d.c));
+    fill("#panel-c", cNodes);
+
+    // TAC
+    fill("#panel-tac", [pre(d.tac || "(no instructions)")]);
+
+    // Optimizer
+    var same = d.before === d.after;
+    var optNodes = [];
+    if (d.chains && d.chains.length) {
+      optNodes.push(el("h3", "opt-h", "Multiplication order"));
+      d.chains.forEach(function (c) { optNodes.push(chainCard(c)); });
+    }
+    optNodes.push(el("h3", "opt-h", "Tree before and after"));
+    if (same) optNodes.push(el("p", "note", "Nothing to reorder here: the optimizer only changes chains of three or more multiplications, and this tree is already in the cheapest order."));
+    else optNodes.push(el("p", "note", "Highlighted lines are what the optimizer changed. It picks the order that needs the fewest multiplications."));
+    var df = same ? { del: {}, add: {} } : diffLines(d.before.split("\n"), d.after.split("\n"));
+    var cols = el("div", "cols");
+    var c1 = el("div", "col"); c1.appendChild(el("h3", null, "Before")); c1.appendChild(diffPre(d.before, df.del, "del"));
+    var c2 = el("div", "col after"); c2.appendChild(el("h3", null, same ? "After (unchanged)" : "After")); c2.appendChild(diffPre(d.after, df.add, "add"));
+    cols.appendChild(c1); cols.appendChild(c2); optNodes.push(cols);
+    fill("#panel-opt", optNodes);
+
+    var kind = d.mode === "function" ? "function" : "program";
+    statusEl.textContent = "";
+    var line = el("span", null);
+    line.appendChild(el("span", "ok", "Compiled"));
+    line.appendChild(document.createTextNode(" as a C " + kind + " in " + d.ms + " ms" + (same ? "" : " · optimizer rewrote a multiply chain")));
+    statusEl.appendChild(line);
+  }
+
+  /* ---------- run ---------- */
+  function run() {
+    runBtn.disabled = true; statusEl.textContent = "Compiling…";
+    fetch("/api/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: editor.value }) })
+      .then(function (r) { return r.json(); })
+      .then(render)
+      .catch(function () { showError("Cannot reach the server. Start it with:  python3 server.py", null); })
+      .then(function () { runBtn.disabled = false; });
+  }
+  runBtn.addEventListener("click", run);
+
+  /* ---------- copy ---------- */
+  $("#copy").addEventListener("click", function () {
+    var p = $("#panel-" + active), text = p.innerText, b = this;
+    function done(ok) { var t = b.textContent; b.textContent = ok ? "Copied" : "Press Cmd+C"; setTimeout(function () { b.textContent = t; }, 1200); }
+    try { navigator.clipboard.writeText(text).then(function () { done(true); }, function () { done(false); }); }
+    catch (e) { done(false); }
+  });
+
+  /* ---------- theme ---------- */
+  function setTheme(t) { document.documentElement.setAttribute("data-theme", t); $("#theme").textContent = t === "dark" ? "Light" : "Dark"; store("matlang.theme", t); }
+  $("#theme").addEventListener("click", function () { setTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark"); });
+  setTheme(store("matlang.theme") === "light" ? "light" : "dark");
+
+  /* ---------- samples ---------- */
+  var samples = [];
+  samplesEl.addEventListener("change", function () {
+    var s = samples[samplesEl.selectedIndex - 1];
+    if (s) { setCode(s.code); }
+  });
+  fetch("/api/samples").then(function (r) { return r.json(); }).then(function (list) {
+    samples = list;
+    var first = el("option", null, "Choose a sample…"); first.value = ""; samplesEl.appendChild(first);
+    list.forEach(function (s) {
+      var label = s.name + (/bad|undefined/.test(s.name) ? "  (shows an error)" : "");
+      var o = el("option", null, label); o.value = s.name; samplesEl.appendChild(o);
+    });
+    if (!editor.value) {
+      var pick = list.filter(function (s) { return s.name === "sample4_chain"; })[0] || list[0];
+      if (pick) { setCode(pick.code); samplesEl.value = pick.name; }
+    }
+  }).catch(function () {
+    statusEl.textContent = "Cannot reach the server. Start it with:  python3 server.py";
+  });
+
+  var saved = store("matlang.code");
+  if (saved) editor.value = saved;
+  renderGutter();
+})();
+</script>
+</body>
+</html>

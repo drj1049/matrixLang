@@ -1,0 +1,7 @@
+# a function where the optimizer changes the order:
+# (A*B)*C would build a 100x100 matrix first, A*(B*C) only a 2x2 one
+input A 100x2
+input B 2x100
+input C 100x2
+D = A * B * C
+output D

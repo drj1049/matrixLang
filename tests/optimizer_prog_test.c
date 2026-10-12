@@ -29,6 +29,8 @@ int main(int argc, char **argv) {
     printf("=== before ===\n");
     for (int i = 0; i < prog.count; i++) ast_print(prog.statements[i], 0);
 
+    printf("=== chains ===\n");
+    optimizer_set_report(stdout);
     optimize_program(&prog);
 
     printf("=== after ===\n");

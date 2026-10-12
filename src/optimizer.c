@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <limits.h>
 #include "optimizer.h"
 
@@ -76,6 +77,68 @@ static ASTNode *build(ASTNode **ops, int split[MAXN][MAXN], int i, int j, int li
     return b;
 }
 
+static FILE *report_out = NULL;
+
+void optimizer_set_report(FILE *f) { report_out = f; }
+
+static void app(char *buf, size_t cap, const char *s) {
+    size_t len = strlen(buf);
+    if (len + 1 >= cap) return;
+    strncat(buf, s, cap - len - 1);
+}
+
+static const char *label(ASTNode *n) {
+    return n->type == NODE_IDENTIFIER ? n->name : "expr";
+}
+
+/* the order a chain is written in, e.g. ((A x B) x C); multiply(a, b, c) folds left to right */
+static void written_str(ASTNode *n, char *buf, size_t cap) {
+    if (n->type == NODE_BINOP && n->op == '*') {
+        app(buf, cap, "(");
+        written_str(n->left, buf, cap);
+        app(buf, cap, " x ");
+        written_str(n->right, buf, cap);
+        app(buf, cap, ")");
+    } else if (n->type == NODE_FUNC_CALL && n->func_kind == TOK_MULTIPLY && n->arg_count >= 2) {
+        for (int i = 1; i < n->arg_count; i++) app(buf, cap, "(");
+        written_str(n->args[0], buf, cap);
+        for (int i = 1; i < n->arg_count; i++) {
+            app(buf, cap, " x ");
+            written_str(n->args[i], buf, cap);
+            app(buf, cap, ")");
+        }
+    } else {
+        app(buf, cap, label(n));
+    }
+}
+
+/* scalar multiplications needed to evaluate the chain in the order it is written */
+static long long written_cost(ASTNode *n) {
+    if (n->type == NODE_BINOP && n->op == '*') {
+        return written_cost(n->left) + written_cost(n->right)
+             + (long long)n->left->result_rows * n->left->result_cols * n->right->result_cols;
+    }
+    if (n->type == NODE_FUNC_CALL && n->func_kind == TOK_MULTIPLY && n->arg_count >= 2) {
+        long long c = written_cost(n->args[0]);
+        int rows = n->args[0]->result_rows, cols = n->args[0]->result_cols;
+        for (int i = 1; i < n->arg_count; i++) {
+            c += written_cost(n->args[i]) + (long long)rows * cols * n->args[i]->result_cols;
+            cols = n->args[i]->result_cols;
+        }
+        return c;
+    }
+    return 0;
+}
+
+static void best_str(ASTNode **ops, int split[MAXN][MAXN], int i, int j, char *buf, size_t cap) {
+    if (i == j) { app(buf, cap, label(ops[i - 1])); return; }
+    app(buf, cap, "(");
+    best_str(ops, split, i, split[i][j], buf, cap);
+    app(buf, cap, " x ");
+    best_str(ops, split, split[i][j] + 1, j, buf, cap);
+    app(buf, cap, ")");
+}
+
 ASTNode *optimize_expr(ASTNode *node) {
     if (node == NULL) return NULL;
 
@@ -97,7 +160,18 @@ ASTNode *optimize_expr(ASTNode *node) {
                 p[i + 1] = ops[i]->result_cols;
 
             int split[MAXN][MAXN];
-            mcm(p, n, split);
+            long long best = mcm(p, n, split);
+
+            if (report_out) {
+                char wtxt[2048] = "", btxt[2048] = "";
+                written_str(node, wtxt, sizeof wtxt);
+                best_str(ops, split, 1, n, btxt, sizeof btxt);
+                fprintf(report_out, "CHAIN\t%d\t", node->line);
+                for (int i = 0; i < n; i++)
+                    fprintf(report_out, "%s%s:%dx%d", i ? "," : "", label(ops[i]),
+                            ops[i]->result_rows, ops[i]->result_cols);
+                fprintf(report_out, "\t%s\t%lld\t%s\t%lld\n", wtxt, written_cost(node), btxt, best);
+            }
 
             ASTNode *root = build(ops, split, 1, n, node->line);
             free_shells(node);
