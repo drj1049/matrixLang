@@ -1,10 +1,12 @@
-/* Full pipeline test: source -> tokens -> AST -> semantic check -> TAC ->
- * actual execution. This is the one to run for your live demo, since it's
- * the only stage that prints real computed numbers instead of structure.
+/* Full pipeline test: source -> tokens -> AST -> semantic check ->
+ * optimizer -> TAC -> actual execution. This is the one to run for your
+ * live demo, since it's the only stage that prints real computed numbers
+ * instead of structure.
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include "../src/semantic.h"
+#include "../src/optimizer.h"
 #include "../src/tac.h"
 #include "../src/interp.h"
 
@@ -30,6 +32,7 @@ int main(int argc, char **argv) {
     char *source = read_file(argv[1]);
     Program prog = parse_program(source);
     semantic_check(&prog);
+    optimize_program(&prog);
     TACProgram tac = tac_generate(&prog);
 
     interp_run(&tac);

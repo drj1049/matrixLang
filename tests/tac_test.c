@@ -1,10 +1,11 @@
-/* Proves lexer.c + ast.c + parser.c + semantic.c + tac.c all link and work
- * together. Runs the full front-end pipeline: source -> tokens -> AST ->
- * semantic check -> three-address code.
+/* Proves lexer.c + ast.c + parser.c + semantic.c + optimizer.c + tac.c all
+ * link and work together. Runs the full front-end pipeline: source ->
+ * tokens -> AST -> semantic check -> optimizer -> three-address code.
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include "../src/semantic.h"
+#include "../src/optimizer.h"
 #include "../src/tac.h"
 
 static char *read_file(const char *path) {
@@ -30,6 +31,7 @@ int main(int argc, char **argv) {
     Program prog = parse_program(source);
 
     semantic_check(&prog); /* exits with a message if anything is invalid */
+    optimize_program(&prog);
 
     TACProgram tac = tac_generate(&prog);
 
