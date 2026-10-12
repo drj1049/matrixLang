@@ -15,13 +15,17 @@
  *   t = func(a1, a2, ..., an)       (func is add/subtract/multiply/transpose/inverse)
  *   t = a                           (plain copy, e.g. X = Y or X = t3)
  *   PRINT a
+ *   INPUT a RxC                     (a matrix passed in by the caller)
+ *   OUTPUT a                        (the matrix handed back to the caller)
  */
 typedef enum {
     TAC_LOAD_MATRIX,
     TAC_BINOP,
     TAC_CALL,
     TAC_COPY,
-    TAC_PRINT
+    TAC_PRINT,
+    TAC_INPUT,
+    TAC_OUTPUT
 } TACOp;
 
 #define TAC_NAME_MAX 64
@@ -31,7 +35,8 @@ typedef struct {
     TACOp op;
     int line;
 
-    char result[TAC_NAME_MAX];   /* every op except PRINT writes a result */
+    char result[TAC_NAME_MAX];   /* every op except PRINT/OUTPUT writes a result;
+                                    for INPUT it is the declared name */
 
     /* TAC_BINOP */
     char arg1[TAC_NAME_MAX];
@@ -43,10 +48,11 @@ typedef struct {
     char call_args[TAC_MAX_CALL_ARGS][TAC_NAME_MAX];
     int call_arg_count;
 
-    /* TAC_COPY / TAC_PRINT */
+    /* TAC_COPY / TAC_PRINT / TAC_OUTPUT */
     char src[TAC_NAME_MAX];
+    int src_is_temp;             /* TAC_COPY: src is a temporary nothing else reads */
 
-    /* TAC_LOAD_MATRIX */
+    /* TAC_LOAD_MATRIX; also the size of a TAC_INPUT / TAC_OUTPUT matrix */
     int rows;
     int cols;
     double **matrix_values;      /* owned deep copy of the literal's numbers */

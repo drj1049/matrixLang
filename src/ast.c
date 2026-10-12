@@ -53,6 +53,20 @@ ASTNode *ast_new_print(const char *target, int line) {
     return n;
 }
 
+ASTNode *ast_new_input(const char *name, int rows, int cols, int line) {
+    ASTNode *n = ast_alloc(NODE_INPUT, line);
+    strncpy(n->name, name, AST_NAME_MAX - 1);
+    n->rows = rows;
+    n->cols = cols;
+    return n;
+}
+
+ASTNode *ast_new_output(const char *name, int line) {
+    ASTNode *n = ast_alloc(NODE_OUTPUT, line);
+    strncpy(n->name, name, AST_NAME_MAX - 1);
+    return n;
+}
+
 void ast_free(ASTNode *node) {
     if (!node) return;
     switch (node->type) {
@@ -72,7 +86,7 @@ void ast_free(ASTNode *node) {
             ast_free(node->value);
             break;
         default:
-            break; /* NODE_NUMBER, NODE_IDENTIFIER, NODE_PRINT own no children */
+            break; /* NODE_NUMBER, NODE_IDENTIFIER, NODE_PRINT, NODE_INPUT, NODE_OUTPUT own no children */
     }
     free(node);
 }
@@ -138,6 +152,14 @@ void ast_print(const ASTNode *node, int indent) {
 
         case NODE_PRINT:
             printf("Print(%s) [line %d]\n", node->print_target, node->line);
+            break;
+
+        case NODE_INPUT:
+            printf("Input(%s, %dx%d) [line %d]\n", node->name, node->rows, node->cols, node->line);
+            break;
+
+        case NODE_OUTPUT:
+            printf("Output(%s) [line %d]\n", node->name, node->line);
             break;
 
         default:

@@ -25,6 +25,8 @@ static const Keyword KEYWORDS[] = {
     {"transpose", TOK_TRANSPOSE},
     {"inverse",   TOK_INVERSE},
     {"print",     TOK_PRINT},
+    {"input",     TOK_INPUT},
+    {"output",    TOK_OUTPUT},
 };
 static const int NUM_KEYWORDS = sizeof(KEYWORDS) / sizeof(KEYWORDS[0]);
 
@@ -78,6 +80,12 @@ static Token scan_identifier_or_keyword(void) {
 static Token scan_number(void) {
     const char *start = src_ptr;
     while (isdigit((unsigned char)*src_ptr)) src_ptr++;
+    /* digits 'x' digits is a matrix size, e.g. 2x3 */
+    if (*src_ptr == 'x' && isdigit((unsigned char)src_ptr[1])) {
+        src_ptr++;
+        while (isdigit((unsigned char)*src_ptr)) src_ptr++;
+        return make_token(TOK_DIMS, start, (int)(src_ptr - start));
+    }
     if (*src_ptr == '.' && isdigit((unsigned char)src_ptr[1])) {
         src_ptr++;
         while (isdigit((unsigned char)*src_ptr)) src_ptr++;
@@ -145,6 +153,7 @@ const char *token_type_name(TokenType type) {
         case TOK_EOF:        return "EOF";
         case TOK_ID:         return "ID";
         case TOK_NUMBER:     return "NUMBER";
+        case TOK_DIMS:       return "DIMS";
         case TOK_PLUS:       return "PLUS";
         case TOK_MINUS:      return "MINUS";
         case TOK_STAR:       return "STAR";
@@ -161,6 +170,8 @@ const char *token_type_name(TokenType type) {
         case TOK_TRANSPOSE:  return "TRANSPOSE";
         case TOK_INVERSE:    return "INVERSE";
         case TOK_PRINT:      return "PRINT";
+        case TOK_INPUT:      return "INPUT";
+        case TOK_OUTPUT:     return "OUTPUT";
         default:             return "UNKNOWN";
     }
 }

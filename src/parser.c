@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 #include "parser.h"
 #include "lexer.h"
 
@@ -150,6 +151,8 @@ static ASTNode *parse_func_call(void) {
 
 /* statement -> ID '=' (funcCall | expr)
  *            | PRINT '(' ID ')'
+ *            | INPUT ID DIMS
+ *            | OUTPUT ID
  */
 static ASTNode *parse_statement(void) {
     Token t = lex_peek();
@@ -160,6 +163,30 @@ static ASTNode *parse_statement(void) {
         Token id = expect(TOK_ID, "expected an identifier inside print(...)");
         expect(TOK_RPAREN, "expected ')' to close print(...)");
         return ast_new_print(id.text, t.line);
+    }
+
+    if (t.type == TOK_INPUT) {
+        lex_advance();
+        Token id = expect(TOK_ID, "expected a matrix name after input");
+        Token dims = expect(TOK_DIMS, "expected a size like 2x3 after the input name");
+
+        /* the lexer guarantees the shape digits 'x' digits */
+        char *end;
+        long rows = strtol(dims.text, &end, 10);
+        long cols = strtol(end + 1, NULL, 10);
+        if (rows < 1 || cols < 1 || rows > INT_MAX || cols > INT_MAX / rows) {
+            fprintf(stderr, "Parse error at line %d: invalid size '%s' for input '%s' "
+                            "(rows and columns must be at least 1, and not too large)\n",
+                    dims.line, dims.text, id.text);
+            exit(1);
+        }
+        return ast_new_input(id.text, (int)rows, (int)cols, t.line);
+    }
+
+    if (t.type == TOK_OUTPUT) {
+        lex_advance();
+        Token id = expect(TOK_ID, "expected a matrix name after output");
+        return ast_new_output(id.text, t.line);
     }
 
     if (t.type == TOK_ID) {
@@ -173,7 +200,7 @@ static ASTNode *parse_statement(void) {
         return ast_new_assign(target.text, value, target.line);
     }
 
-    parse_error("expected a statement (assignment or print)", t);
+    parse_error("expected a statement (assignment, print, input or output)", t);
     return NULL; /* unreachable */
 }
 

@@ -3,8 +3,8 @@
 
 #include "ast.h"
 
-/* A whole program is just a flat list of statements (ASSIGN or PRINT nodes),
- * in the order they appeared in the source.
+/* A whole program is just a flat list of statements (ASSIGN, PRINT, INPUT
+ * or OUTPUT nodes), in the order they appeared in the source.
  */
 typedef struct {
     ASTNode **statements;

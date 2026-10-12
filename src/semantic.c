@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
+#include <ctype.h>
 #include "semantic.h"
 
 /* ---- Symbol table ----
@@ -13,6 +14,7 @@ typedef struct {
     char name[AST_NAME_MAX];
     int rows;
     int cols;
+    int is_input;   /* declared with 'input': owned by the caller, read-only */
 } Symbol;
 
 typedef struct {
@@ -46,10 +48,16 @@ static void symtab_set(SymbolTable *st, const char *name, int rows, int cols) {
         st->count++;
         st->items = realloc(st->items, sizeof(Symbol) * st->count);
         idx = st->count - 1;
+        memset(&st->items[idx], 0, sizeof(Symbol));
         strncpy(st->items[idx].name, name, AST_NAME_MAX - 1);
     }
     st->items[idx].rows = rows;
     st->items[idx].cols = cols;
+}
+
+static int symtab_is_input(SymbolTable *st, const char *name) {
+    int idx = symtab_find(st, name);
+    return idx != -1 && st->items[idx].is_input;
 }
 
 /* Returns 1 and fills rows/cols if found, else returns 0. */
@@ -203,15 +211,42 @@ static void check_expr(SymbolTable *st, ASTNode *node) {
     }
 }
 
+/* t0, t1, ... are the names tac.c gives its temporaries, so a user variable
+ * with one of those names would silently share storage with a temporary.
+ */
+static void check_not_temp_name(const char *name, int line) {
+    if (name[0] != 't' || name[1] == '\0') return;
+    for (const char *p = name + 1; *p; p++) {
+        if (!isdigit((unsigned char)*p)) return;
+    }
+    sem_error(line, "'%s' is reserved for compiler temporaries, pick another name", name);
+}
+
 /* ---- Check a single top-level statement ---- */
 static void check_statement(SymbolTable *st, ASTNode *stmt) {
     if (stmt->type == NODE_ASSIGN) {
+        check_not_temp_name(stmt->target, stmt->line);
+        if (symtab_is_input(st, stmt->target)) {
+            sem_error(stmt->line, "cannot assign to input '%s' (inputs belong to the caller)",
+                      stmt->target);
+        }
         check_expr(st, stmt->value);
         symtab_set(st, stmt->target, stmt->value->result_rows, stmt->value->result_cols);
     } else if (stmt->type == NODE_PRINT) {
         int r, c;
         if (!symtab_get(st, stmt->print_target, &r, &c)) {
             sem_error(stmt->line, "cannot print undefined variable '%s'", stmt->print_target);
+        }
+    } else if (stmt->type == NODE_INPUT) {
+        check_not_temp_name(stmt->name, stmt->line);
+        if (symtab_find(st, stmt->name) != -1) {
+            sem_error(stmt->line, "input '%s' is already defined", stmt->name);
+        }
+        symtab_set(st, stmt->name, stmt->rows, stmt->cols);
+        st->items[symtab_find(st, stmt->name)].is_input = 1;
+    } else if (stmt->type == NODE_OUTPUT) {
+        if (!symtab_get(st, stmt->name, &stmt->result_rows, &stmt->result_cols)) {
+            sem_error(stmt->line, "cannot output undefined variable '%s'", stmt->name);
         }
     } else {
         sem_error(stmt->line, "internal error: unexpected node at statement level");
@@ -220,8 +255,28 @@ static void check_statement(SymbolTable *st, ASTNode *stmt) {
 
 void semantic_check(Program *prog) {
     SymbolTable *st = symtab_new();
+    int first_input_line = 0;
+    int has_output = 0;
+
     for (int i = 0; i < prog->count; i++) {
-        check_statement(st, prog->statements[i]);
+        ASTNode *stmt = prog->statements[i];
+
+        /* output is the function's return, so it has to come last */
+        if (has_output) {
+            if (stmt->type == NODE_OUTPUT) {
+                sem_error(stmt->line, "only one output is supported");
+            }
+            sem_error(stmt->line, "no statements are allowed after output");
+        }
+
+        check_statement(st, stmt);
+
+        if (stmt->type == NODE_INPUT && !first_input_line) first_input_line = stmt->line;
+        if (stmt->type == NODE_OUTPUT) has_output = 1;
+    }
+
+    if (first_input_line && !has_output) {
+        sem_error(first_input_line, "program declares inputs but has no output statement");
     }
     symtab_free(st);
 }

@@ -2,14 +2,23 @@
 set -e
 
 if [ -z "$1" ]; then
-  echo "usage: ./matlangc file.matlang"
+  echo "usage: ./matlangc file.matlang [function_name]"
   exit 1
 fi
 
-mkdir -p build
-gcc tests/codegen_test.c src/lexer.c src/ast.c src/parser.c src/semantic.c src/optimizer.c src/tac.c src/codegen.c -o build/compiler
+make -s build/compiler
 
 name=$(basename "$1" .matlang)
-./build/compiler "$1" "build/$name.c"
+rm -f "build/$name.h"
+./build/compiler "$1" "build/$name.c" $2
+
+# a program with input/output becomes a function for other C code to call,
+# so there is nothing to run
+if [ -f "build/$name.h" ]; then
+  echo "wrote build/$name.c and build/$name.h:"
+  grep '^Mat ' "build/$name.h"
+  exit 0
+fi
+
 gcc -I src "build/$name.c" -o "build/$name" -lm
 ./build/"$name"

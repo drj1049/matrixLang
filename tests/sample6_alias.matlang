@@ -1,0 +1,4 @@
+# the result must be a fresh copy, never the caller's own A
+input A 2x2
+C = A
+output C

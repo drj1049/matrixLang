@@ -1,0 +1,3 @@
+# deliberately broken: a program with inputs has to say what it returns
+input A 2x2
+B = A + A

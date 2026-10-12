@@ -249,6 +249,19 @@ void interp_run(const TACProgram *tac) {
                 printf("\n");
                 break;
             }
+            case TAC_INPUT: {
+                /* the numbers only exist once a C caller passes them in */
+                fprintf(stderr, "runtime error at line %d: input '%s' has no data here, "
+                                "compile this program to C and call it instead\n",
+                        ins->line, ins->result);
+                exit(1);
+            }
+            case TAC_OUTPUT: {
+                printf("%s =\n", ins->src);
+                print_value(env_get(&env, ins->src));
+                printf("\n");
+                break;
+            }
         }
     }
 

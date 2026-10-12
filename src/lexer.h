@@ -11,6 +11,7 @@ typedef enum {
     TOK_EOF,
     TOK_ID,
     TOK_NUMBER,
+    TOK_DIMS,       /* a size like 2x3, used by input declarations */
 
     /* infix operators */
     TOK_PLUS,       /* + */
@@ -33,6 +34,10 @@ typedef enum {
     TOK_TRANSPOSE,
     TOK_INVERSE,
     TOK_PRINT,
+
+    /* keywords for programs that compile to a callable function */
+    TOK_INPUT,
+    TOK_OUTPUT,
 
     TOK_UNKNOWN
 } TokenType;

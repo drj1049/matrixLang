@@ -117,12 +117,29 @@ static void gen_statement(ASTNode *stmt) {
         ins->line = stmt->line;
         strncpy(ins->result, stmt->target, TAC_NAME_MAX - 1);
         strncpy(ins->src, place, TAC_NAME_MAX - 1);
+        ins->src_is_temp = (stmt->value->type != NODE_IDENTIFIER);
 
     } else if (stmt->type == NODE_PRINT) {
         TACInstr *ins = tac_emit();
         ins->op = TAC_PRINT;
         ins->line = stmt->line;
         strncpy(ins->src, stmt->print_target, TAC_NAME_MAX - 1);
+
+    } else if (stmt->type == NODE_INPUT) {
+        TACInstr *ins = tac_emit();
+        ins->op = TAC_INPUT;
+        ins->line = stmt->line;
+        strncpy(ins->result, stmt->name, TAC_NAME_MAX - 1);
+        ins->rows = stmt->rows;
+        ins->cols = stmt->cols;
+
+    } else if (stmt->type == NODE_OUTPUT) {
+        TACInstr *ins = tac_emit();
+        ins->op = TAC_OUTPUT;
+        ins->line = stmt->line;
+        strncpy(ins->src, stmt->name, TAC_NAME_MAX - 1);
+        ins->rows = stmt->result_rows;
+        ins->cols = stmt->result_cols;
 
     } else {
         fprintf(stderr, "internal error: unexpected node kind at statement level\n");
@@ -165,6 +182,12 @@ void tac_print(const TACProgram *tac) {
                 break;
             case TAC_PRINT:
                 printf("PRINT %s\n", ins->src);
+                break;
+            case TAC_INPUT:
+                printf("INPUT %s %dx%d\n", ins->result, ins->rows, ins->cols);
+                break;
+            case TAC_OUTPUT:
+                printf("OUTPUT %s\n", ins->src);
                 break;
         }
     }

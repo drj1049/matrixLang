@@ -9,7 +9,11 @@
  *   - infix '*' and multiply: chain must be conformable (A.cols == B.rows)
  *   - transpose: always valid, swaps dims
  *   - inverse: operand must be square
- *   - every identifier used must have been assigned earlier
+ *   - every identifier used must have been assigned (or declared as an
+ *     input) earlier
+ *   - inputs are read-only and can only be declared once
+ *   - at most one output, as the last statement; a program with inputs
+ *     must have one
  * As a side effect, fills in result_rows/result_cols on every expression
  * node in the AST, so later stages (optimizer, codegen) don't need to
  * recompute dimensions themselves.

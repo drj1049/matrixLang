@@ -1,0 +1,4 @@
+# deliberately broken: inputs belong to the caller and are read-only
+input A 2x2
+A = A + A
+output A

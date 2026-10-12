@@ -1,0 +1,9 @@
+# compiles to a C function: Mat matlang_compute(Mat A, Mat B, Mat C)
+input A 2x3
+input B 3x2
+input C 2x2
+P = A * B * C
+S = add(P, C, C)
+S = S - C
+R = transpose(S)
+output R

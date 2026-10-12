@@ -14,7 +14,11 @@ typedef struct {
 } Mat;
 
 static inline Mat mat_new(int r, int c) {
-    Mat m = { r, c, calloc((size_t)r * c, sizeof(double)) };
+    Mat m = { r, c, (double *)calloc((size_t)r * c, sizeof(double)) };
+    if (!m.d) {
+        fprintf(stderr, "Runtime error: out of memory for a %dx%d matrix\n", r, c);
+        exit(1);
+    }
     return m;
 }
 
@@ -22,6 +26,38 @@ static inline Mat mat_from(int r, int c, const double *vals) {
     Mat m = mat_new(r, c);
     memcpy(m.d, vals, (size_t)r * c * sizeof(double));
     return m;
+}
+
+static inline Mat mat_copy(Mat a) {
+    return mat_from(a.r, a.c, a.d);
+}
+
+static inline void mat_free(Mat m) {
+    free(m.d);
+}
+
+/* dst = val, releasing whatever dst held before */
+static inline void mat_set(Mat *dst, Mat val) {
+    free(dst->d);
+    *dst = val;
+}
+
+/* dst takes over src's data without copying it */
+static inline void mat_move(Mat *dst, Mat *src) {
+    mat_set(dst, *src);
+    src->d = NULL;
+}
+
+/* generated functions call this on every input before touching it */
+static inline void mat_check(const char *fn, const char *name, Mat m, int r, int c) {
+    if (m.r != r || m.c != c) {
+        fprintf(stderr, "%s: input %s must be %dx%d, got %dx%d\n", fn, name, r, c, m.r, m.c);
+        exit(1);
+    }
+    if (!m.d) {
+        fprintf(stderr, "%s: input %s has no data (NULL pointer)\n", fn, name);
+        exit(1);
+    }
 }
 
 static inline Mat mat_add(Mat a, Mat b) {
@@ -63,7 +99,7 @@ static inline Mat mat_transpose(Mat a) {
 static inline Mat mat_inverse(Mat a) {
     int n = a.r;
     Mat m = mat_new(n, n);
-    double *w = malloc((size_t)n * n * sizeof(double));
+    double *w = (double *)malloc((size_t)n * n * sizeof(double));
     memcpy(w, a.d, (size_t)n * n * sizeof(double));
     for (int i = 0; i < n; i++) m.d[i * n + i] = 1.0;
 

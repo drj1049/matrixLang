@@ -4,7 +4,8 @@
 #include "lexer.h"  /* for TokenType, used to tag which function a call is */
 
 /* ---- What kind of AST node this is ----
- * A statement is either an ASSIGN ("X = ...") or a PRINT ("print(X)").
+ * A statement is either an ASSIGN ("X = ..."), a PRINT ("print(X)"),
+ * an INPUT ("input A 2x3") or an OUTPUT ("output C").
  * The right-hand side of an ASSIGN is always an expression node:
  * IDENTIFIER, MATRIX_LITERAL, BINOP (infix add/sub/mul), or FUNC_CALL
  * (add/subtract/multiply/transpose/inverse).
@@ -16,7 +17,9 @@ typedef enum {
     NODE_BINOP,           /* A + B, A - B, A * B (infix, always 2 operands) */
     NODE_FUNC_CALL,       /* add(A,B,C), multiply(A,B,C,D), transpose(A), inverse(A) */
     NODE_ASSIGN,          /* X = <expr> */
-    NODE_PRINT             /* print(X) */
+    NODE_PRINT,           /* print(X) */
+    NODE_INPUT,           /* input A 2x3: a matrix the caller passes in */
+    NODE_OUTPUT           /* output C: the matrix the generated function returns */
 } NodeType;
 
 #define AST_NAME_MAX 64
@@ -25,10 +28,11 @@ typedef struct ASTNode {
     NodeType type;
     int line;
 
-    /* NODE_IDENTIFIER */
+    /* NODE_IDENTIFIER, NODE_INPUT, NODE_OUTPUT */
     char name[AST_NAME_MAX];
 
-    /* NODE_MATRIX_LITERAL: a rows x cols grid of numbers */
+    /* NODE_MATRIX_LITERAL: a rows x cols grid of numbers.
+     * NODE_INPUT: the declared size (values stays NULL). */
     double **values;
     int rows;
     int cols;
@@ -50,7 +54,8 @@ typedef struct ASTNode {
     /* Filled in by semantic analysis (0 until then): the dimensions this
      * expression evaluates to. Valid on IDENTIFIER, MATRIX_LITERAL, BINOP,
      * and FUNC_CALL nodes. The optimizer reads these later instead of
-     * recomputing dimensions itself.
+     * recomputing dimensions itself. Also set on OUTPUT, so the code
+     * generator can document the size of the returned matrix.
      */
     int result_rows;
     int result_cols;
@@ -70,6 +75,8 @@ ASTNode *ast_new_binop(char op, ASTNode *left, ASTNode *right, int line);
 ASTNode *ast_new_func_call(TokenType func_kind, ASTNode **args, int arg_count, int line);
 ASTNode *ast_new_assign(const char *target, ASTNode *value, int line);
 ASTNode *ast_new_print(const char *target, int line);
+ASTNode *ast_new_input(const char *name, int rows, int cols, int line);
+ASTNode *ast_new_output(const char *name, int line);
 
 /* Recursively frees a node and everything it owns. */
 void ast_free(ASTNode *node);
