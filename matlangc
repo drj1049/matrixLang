@@ -1,0 +1,15 @@
+#!/bin/sh
+set -e
+
+if [ -z "$1" ]; then
+  echo "usage: ./matlangc file.matlang"
+  exit 1
+fi
+
+mkdir -p build
+gcc tests/codegen_test.c src/lexer.c src/ast.c src/parser.c src/semantic.c src/optimizer.c src/tac.c src/codegen.c -o build/compiler
+
+name=$(basename "$1" .matlang)
+./build/compiler "$1" "build/$name.c"
+gcc -I src "build/$name.c" -o "build/$name" -lm
+./build/"$name"

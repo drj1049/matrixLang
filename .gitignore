@@ -60,4 +60,4 @@ tests/lexer_test
 tests/parser_test
 tests/semantic_test
 *.o
-*.out
+*.outbuild/
