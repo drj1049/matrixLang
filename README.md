@@ -2,6 +2,8 @@
 
 ![CI](https://github.com/drj1049/matrixLang/actions/workflows/ci.yml/badge.svg)
 
+**Try it online: https://matrixlang.onrender.com** (on the free plan the site sleeps when nobody is using it, so the first visit can take about a minute to wake up).
+
 A small compiler for a domain-specific language built around matrix operations. Built as a Compiler Design course project. Supports declaring matrices (including negative numbers, `identity(n)` and `zeros(r, c)`), multiplying by a number, negating, adding, subtracting, multiplying, transposing, inverting, and printing them. Programs compile to plain C, either a standalone program or a function other C code can call, and chains of multiplications are reordered to the cheapest order.
 
 ## Example program
