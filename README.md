@@ -1,5 +1,7 @@
 # MatrixLang
 
+![CI](https://github.com/drj1049/matrixLang/actions/workflows/ci.yml/badge.svg)
+
 A small compiler for a domain-specific language built around matrix operations. Built as a Compiler Design course project. Supports declaring matrices (including negative numbers, `identity(n)` and `zeros(r, c)`), multiplying by a number, negating, adding, subtracting, multiplying, transposing, inverting, and printing them. Programs compile to plain C, either a standalone program or a function other C code can call, and chains of multiplications are reordered to the cheapest order.
 
 ## Example program
@@ -20,6 +22,7 @@ A = [[1,-2.5],[-3,4]]        # a matrix literal; numbers may be negative
 I = identity(2)              # 2x2 identity matrix
 Z = zeros(2,3)               # 2x3 matrix of zeros
 B = A * I + A                # infix + - *
+G = (A + B) * A              # parentheses group, so a sum can sit inside a product
 S = 2 * A                    # multiply every element by a number (A * 2 works too)
 N = -A                       # same as -1 * A
 C = multiply(A, I, A)        # or add / subtract / multiply with 2 or more matrices
@@ -27,7 +30,7 @@ D = transpose(A)             # transpose / inverse take one matrix
 print(B)
 ```
 
-`identity` and `zeros` take whole numbers from 1 to 10000 (and at most 10 million elements in total). They are keywords, so they cannot be used as variable names. A negative number is written directly inside a matrix literal, as in `[[1,-2.5]]`. A number has to be multiplied with a matrix: `2 * A` and `A * 0.5` are fine, but `X = 5`, `A + 5` and `2 * 3` are errors. `-A` and `A - -B` work. Numbers and `-` apply to a single matrix, ID, literal or `identity`/`zeros`, not to a function call such as `add(...)` (there are no parentheses in expressions), so put the call in its own line first. Scaling by numbers next to each other is folded at compile time, so `2 * A * 3` becomes `6 * A`.
+`identity` and `zeros` take whole numbers from 1 to 10000 (and at most 10 million elements in total). They are keywords, so they cannot be used as variable names. A negative number is written directly inside a matrix literal, as in `[[1,-2.5]]`. A number has to be multiplied with a matrix: `2 * A` and `A * 0.5` are fine, but `X = 5`, `A + 5` and `2 * 3` are errors. `-A` and `A - -B` work. Parentheses group an expression, so `(A + B) * C`, `2 * (A - B)` and `-(A + B)` all work, and nest up to 200 levels. What is inside the parentheses must be a matrix expression, so `(2) * A` is an error (write `2 * A`). Numbers and `-` apply to a matrix, ID, literal, `identity`/`zeros` or a parenthesized expression, not to a function call such as `add(...)`, so put the call in its own line first. A statement can hold at most 2000 operators, and one multiplication chain at most 63 matrices. Scaling by numbers next to each other is folded at compile time, so `2 * A * 3` becomes `6 * A`.
 
 ## Project structure
 
@@ -36,6 +39,7 @@ matrixLang/
   src/
     lexer.h    lexer.c      tokenizes source code
     ast.h      ast.c        AST node definitions and construction
+    diag.h     diag.c       prints errors with the source line and a ^ under the problem
     parser.h   parser.c     recursive descent parser
     semantic.h semantic.c   dimension checking and symbol table
     tac.h      tac.c        three-address code generation
@@ -49,6 +53,7 @@ matrixLang/
     func_caller.c           calls the generated functions the way a real project would
     fuzz.py                 random program tester (checks the compiler against Python)
     sample*.matlang         valid and deliberately broken programs
+  .github/workflows/ci.yml  runs the checks on every push
   Makefile                  make, make test, make run FILE=...
   LICENSE                   MIT
   matlangc                  one command: compile a .matlang file to C, build it and run it
@@ -84,7 +89,7 @@ funcCall     -> ( 'add' | 'subtract' | 'multiply' ) '(' ID ( ',' ID )+ ')'
 expr         -> term ( ( '+' | '-' ) term )*
 term         -> unary ( '*' unary )*
 unary        -> '-' unary | NUMBER | factor
-factor       -> ID | matrixLiteral | matrixGen
+factor       -> ID | matrixLiteral | matrixGen | '(' expr ')'
 
 matrixGen    -> 'identity' '(' NUMBER ')'
               | 'zeros' '(' NUMBER ',' NUMBER ')'
@@ -102,17 +107,26 @@ comment      -> '#' up to the end of the line
 
 | Level | Operator | Associativity |
 |-------|----------|---------------|
+| 0 | `( ... )` | overrides everything below |
 | 1 | unary `-` | right (`- - A` is `-(-A)`) |
 | 2 | `*` | left |
 | 3 | `+` `-` | left |
 
-So `A - B - C` is `(A - B) - C`, and `2 * A + B * C` is `(2 * A) + (B * C)`. There are no parentheses in expressions. The function calls (`add(...)`, `transpose(...)` and so on) are only allowed as the whole right-hand side of an assignment.
+So `A - B - C` is `(A - B) - C`, `2 * A + B * C` is `(2 * A) + (B * C)`, and `A - (B - C)` keeps its own grouping. Parentheses only change how the tree is built, there is no node for them. For a multiplication chain the optimizer ignores the grouping the user wrote and picks the cheapest one anyway, so `A * (B * C)` is rearranged to `(A * B) * C` when that is cheaper (`-O0` keeps the written order). The function calls (`add(...)`, `transpose(...)` and so on) are only allowed as the whole right-hand side of an assignment.
 
 Two rules are checked after parsing because the grammar alone cannot express them: a product may not end up as a bare number (`2 * 3` and `A + 5` are errors), and `ID`s named like keywords or `t0`, `t1`, ... are reserved.
 
 ## Error recovery
 
-The compiler reports up to 20 errors in one run instead of stopping at the first. After a syntax error it skips ahead (panic mode) to the next `print`, `input`, `output` or a name at the start of a later line, and carries on parsing from there. The semantic checker does the same per statement. A variable whose definition failed is marked as bad, so later uses of it do not produce a pile of follow-up errors. The run ends with `N errors found.`; the web page marks every offending line in the gutter.
+The compiler reports up to 20 errors in one run instead of stopping at the first. After a syntax error it skips ahead (panic mode) to the next `print`, `input`, `output` or a name at the start of a later line, and carries on parsing from there. The semantic checker does the same per statement. A variable whose definition failed is marked as bad, so later uses of it do not produce a pile of follow-up errors. The run ends with `N errors found.`; the web page marks every offending line in the gutter. Each error shows the source line with a caret under the problem, like this:
+
+```
+Parse error at line 4, column 15: expected ']' to close matrix literal (got 'print' on line 5)
+ 4 | C = A * [[1,2]
+   |               ^
+```
+
+When something is missing at the end of a line, the caret sits just after the last token of that line, not on the next line.
 
 ## TAC optimizer
 
@@ -156,25 +170,25 @@ gcc -Wall -o tests/lexer_test tests/lexer_test.c src/lexer.c -Isrc
 
 **Parser**
 ```
-gcc -Wall -o tests/parser_test tests/parser_test.c src/lexer.c src/ast.c src/parser.c -Isrc
+gcc -Wall -o tests/parser_test tests/parser_test.c src/lexer.c src/ast.c src/diag.c src/parser.c -Isrc
 ./tests/parser_test tests/sample1.matlang
 ```
 
 **Semantic analysis**
 ```
-gcc -Wall -o tests/semantic_test tests/semantic_test.c src/lexer.c src/ast.c src/parser.c src/semantic.c -Isrc
+gcc -Wall -o tests/semantic_test tests/semantic_test.c src/lexer.c src/ast.c src/diag.c src/parser.c src/semantic.c -Isrc
 ./tests/semantic_test tests/sample1.matlang
 ```
 
 **TAC generation**
 ```
-gcc -Wall -o tests/tac_test tests/tac_test.c src/lexer.c src/ast.c src/parser.c src/semantic.c src/optimizer.c src/tac.c src/tacopt.c -Isrc
+gcc -Wall -o tests/tac_test tests/tac_test.c src/lexer.c src/ast.c src/diag.c src/parser.c src/semantic.c src/optimizer.c src/tac.c src/tacopt.c -Isrc
 ./tests/tac_test tests/sample1.matlang
 ```
 
 **Full execution**
 ```
-gcc -Wall -o tests/interp_test tests/interp_test.c src/lexer.c src/ast.c src/parser.c src/semantic.c src/optimizer.c src/tac.c src/tacopt.c src/interp.c -Isrc -lm
+gcc -Wall -o tests/interp_test tests/interp_test.c src/lexer.c src/ast.c src/diag.c src/parser.c src/semantic.c src/optimizer.c src/tac.c src/tacopt.c src/interp.c -Isrc -lm
 ./tests/interp_test tests/sample1.matlang
 ```
 
@@ -232,6 +246,8 @@ Rules:
 
 ## Status
 
-Working: lexer, parser, AST, a written grammar, reporting several errors at once, semantic analysis with symbol table, negative numbers in matrix literals, `identity` and `zeros`, scalar multiplication and unary minus, an `-O0` switch for the optimizer, matrix chain multiplication optimizer, common subexpression reuse and algebraic rewrites on the TAC, three-address code generation, an interpreter that performs real matrix arithmetic including inversion via Gauss-Jordan elimination, and C code generation (standalone program or callable function) with a loop-tiled multiply.
+Working: lexer, parser, AST, a written grammar, parentheses in expressions, reporting several errors at once with a caret under each problem, semantic analysis with symbol table, negative numbers in matrix literals, `identity` and `zeros`, scalar multiplication and unary minus, an `-O0` switch for the optimizer, matrix chain multiplication optimizer, common subexpression reuse and algebraic rewrites on the TAC, three-address code generation, an interpreter that performs real matrix arithmetic including inversion via Gauss-Jordan elimination, and C code generation (standalone program or callable function) with a loop-tiled multiply.
 
-`make test` checks that compiled output matches the interpreter (with the optimizer on and off), that the generated functions return correct, freshly allocated results, and that the broken samples are rejected. `make fuzz` generates random programs and checks every stage (interpreter and compiled C, optimizer on and off) against an independent Python calculation.
+`make sanitize` builds the compiler with the address and undefined-behaviour sanitizers and runs every sample through it. The same three commands (`make test`, `make fuzz`, `make sanitize`) run on GitHub for every push (see the CI badge at the top).
+
+`make test` checks that compiled output matches the interpreter (with the optimizer on and off), that the generated functions return correct, freshly allocated results, and that the broken samples are rejected with exactly the expected messages and carets (the expected text is kept in `tests/*.expected`). `make fuzz` generates random programs and checks every stage (interpreter and compiled C, optimizer on and off) against an independent Python calculation.

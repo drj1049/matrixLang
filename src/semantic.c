@@ -5,6 +5,7 @@
 #include <ctype.h>
 #include <setjmp.h>
 #include "semantic.h"
+#include "diag.h"
 
 /* ---- Symbol table ----
  * Tracks, for every variable assigned so far, what dimensions it holds.
@@ -98,6 +99,8 @@ static int symtab_get(SymbolTable *st, const char *name, int *rows, int *cols) {
 
 typedef struct {
     int line;
+    int col;
+    int len;
     char msg[256];
 } SemError;
 
@@ -107,27 +110,31 @@ static int sem_too_many;
 static jmp_buf stmt_jmp;
 
 /* write an error down without leaving the current statement */
-static void sem_note(int line, const char *fmt, ...) {
+static void sem_note(const ASTNode *at, const char *fmt, ...) {
     if (sem_error_count >= MAX_SEM_ERRORS) {
         sem_too_many = 1;
         return;
     }
     va_list args;
     va_start(args, fmt);
-    sem_errors[sem_error_count].line = line;
+    sem_errors[sem_error_count].line = at->line;
+    sem_errors[sem_error_count].col = at->col;
+    sem_errors[sem_error_count].len = at->len;
     vsnprintf(sem_errors[sem_error_count].msg, sizeof sem_errors[sem_error_count].msg, fmt, args);
     va_end(args);
     sem_error_count++;
 }
 
 /* write an error down and give up on the current statement */
-static void sem_error(int line, const char *fmt, ...) {
+static void sem_error(const ASTNode *at, const char *fmt, ...) {
     if (sem_error_count >= MAX_SEM_ERRORS) {
         sem_too_many = 1;
     } else {
         va_list args;
         va_start(args, fmt);
-        sem_errors[sem_error_count].line = line;
+        sem_errors[sem_error_count].line = at->line;
+        sem_errors[sem_error_count].col = at->col;
+        sem_errors[sem_error_count].len = at->len;
         vsnprintf(sem_errors[sem_error_count].msg, sizeof sem_errors[sem_error_count].msg, fmt, args);
         va_end(args);
         sem_error_count++;
@@ -170,7 +177,7 @@ static void check_expr(SymbolTable *st, ASTNode *node) {
         case NODE_IDENTIFIER: {
             int r, c;
             if (!symtab_get(st, node->name, &r, &c)) {
-                sem_error(node->line, "undefined variable '%s'", node->name);
+                sem_error(node, "undefined variable '%s'", node->name);
             }
             if (symtab_is_bad(st, node->name)) sem_skip_statement();
             node->result_rows = r;
@@ -186,7 +193,7 @@ static void check_expr(SymbolTable *st, ASTNode *node) {
 
             if (node->op == '+' || node->op == '-') {
                 if (lr != rr || lc != rc) {
-                    sem_error(node->line,
+                    sem_error(node,
                         "dimension mismatch for infix '%c': %dx%d vs %dx%d",
                         node->op, lr, lc, rr, rc);
                 }
@@ -194,7 +201,7 @@ static void check_expr(SymbolTable *st, ASTNode *node) {
                 node->result_cols = lc;
             } else { /* '*' */
                 if (lc != rr) {
-                    sem_error(node->line,
+                    sem_error(node,
                         "cannot multiply %dx%d by %dx%d (inner dimensions must match)",
                         lr, lc, rr, rc);
                 }
@@ -223,7 +230,7 @@ static void check_expr(SymbolTable *st, ASTNode *node) {
                         int ar = node->args[i]->result_rows;
                         int ac = node->args[i]->result_cols;
                         if (ar != base_r || ac != base_c) {
-                            sem_error(node->line,
+                            sem_error(node->args[i],
                                 "argument %d has dims %dx%d, expected %dx%d to match the others (add/subtract require identical dimensions)",
                                 i + 1, ar, ac, base_r, base_c);
                         }
@@ -245,7 +252,7 @@ static void check_expr(SymbolTable *st, ASTNode *node) {
                         int nr = node->args[i]->result_rows;
                         int nc = node->args[i]->result_cols;
                         if (cur_cols != nr) {
-                            sem_error(node->line,
+                            sem_error(node->args[i],
                                 "cannot chain-multiply: %dx%d by %dx%d at argument %d (inner dimensions must match)",
                                 cur_rows, cur_cols, nr, nc, i + 1);
                         }
@@ -266,7 +273,7 @@ static void check_expr(SymbolTable *st, ASTNode *node) {
                 case TOK_INVERSE: {
                     ASTNode *a = node->args[0];
                     if (a->result_rows != a->result_cols) {
-                        sem_error(node->line,
+                        sem_error(a,
                             "inverse requires a square matrix, got %dx%d",
                             a->result_rows, a->result_cols);
                     }
@@ -276,33 +283,33 @@ static void check_expr(SymbolTable *st, ASTNode *node) {
                 }
 
                 default:
-                    sem_error(node->line, "internal error: unknown function kind");
+                    sem_error(node, "internal error: unknown function kind");
             }
             break;
         }
 
         default:
-            sem_error(node->line, "internal error: unexpected node in expression position");
+            sem_error(node, "internal error: unexpected node in expression position");
     }
 }
 
 /* t0, t1, ... are the names tac.c gives its temporaries, so a user variable
  * with one of those names would silently share storage with a temporary.
  */
-static void check_not_temp_name(const char *name, int line) {
+static void check_not_temp_name(const char *name, const ASTNode *at) {
     if (name[0] != 't' || name[1] == '\0') return;
     for (const char *p = name + 1; *p; p++) {
         if (!isdigit((unsigned char)*p)) return;
     }
-    sem_error(line, "'%s' is reserved for compiler temporaries, pick another name", name);
+    sem_error(at, "'%s' is reserved for compiler temporaries, pick another name", name);
 }
 
 /* ---- Check a single top-level statement ---- */
 static void check_statement(SymbolTable *st, ASTNode *stmt) {
     if (stmt->type == NODE_ASSIGN) {
-        check_not_temp_name(stmt->target, stmt->line);
+        check_not_temp_name(stmt->target, stmt);
         if (symtab_is_input(st, stmt->target)) {
-            sem_error(stmt->line, "cannot assign to input '%s' (inputs belong to the caller)",
+            sem_error(stmt, "cannot assign to input '%s' (inputs belong to the caller)",
                       stmt->target);
         }
         check_expr(st, stmt->value);
@@ -310,29 +317,29 @@ static void check_statement(SymbolTable *st, ASTNode *stmt) {
     } else if (stmt->type == NODE_PRINT) {
         int r, c;
         if (!symtab_get(st, stmt->print_target, &r, &c)) {
-            sem_error(stmt->line, "cannot print undefined variable '%s'", stmt->print_target);
+            sem_error(stmt, "cannot print undefined variable '%s'", stmt->print_target);
         }
         if (symtab_is_bad(st, stmt->print_target)) sem_skip_statement();
     } else if (stmt->type == NODE_INPUT) {
-        check_not_temp_name(stmt->name, stmt->line);
+        check_not_temp_name(stmt->name, stmt);
         if (symtab_find(st, stmt->name) != -1) {
-            sem_error(stmt->line, "input '%s' is already defined", stmt->name);
+            sem_error(stmt, "input '%s' is already defined", stmt->name);
         }
         symtab_set(st, stmt->name, stmt->rows, stmt->cols);
         st->items[symtab_find(st, stmt->name)].is_input = 1;
     } else if (stmt->type == NODE_OUTPUT) {
         if (!symtab_get(st, stmt->name, &stmt->result_rows, &stmt->result_cols)) {
-            sem_error(stmt->line, "cannot output undefined variable '%s'", stmt->name);
+            sem_error(stmt, "cannot output undefined variable '%s'", stmt->name);
         }
         if (symtab_is_bad(st, stmt->name)) sem_skip_statement();
     } else {
-        sem_error(stmt->line, "internal error: unexpected node at statement level");
+        sem_error(stmt, "internal error: unexpected node at statement level");
     }
 }
 
 void semantic_check(Program *prog) {
     SymbolTable *st = symtab_new();
-    int first_input_line = 0;
+    const ASTNode *first_input = NULL;
     int has_output = 0;
 
     sem_error_count = 0;
@@ -345,9 +352,9 @@ void semantic_check(Program *prog) {
             /* output is the function's return, so it has to come last */
             if (has_output) {
                 if (stmt->type == NODE_OUTPUT) {
-                    sem_error(stmt->line, "only one output is supported");
+                    sem_error(stmt, "only one output is supported");
                 }
-                sem_error(stmt->line, "no statements are allowed after output");
+                sem_error(stmt, "no statements are allowed after output");
             }
             check_statement(st, stmt);
         } else if (stmt->type == NODE_ASSIGN) {
@@ -355,14 +362,14 @@ void semantic_check(Program *prog) {
             symtab_mark_bad(st, stmt->target);
         }
 
-        if (stmt->type == NODE_INPUT && !first_input_line) first_input_line = stmt->line;
+        if (stmt->type == NODE_INPUT && !first_input) first_input = stmt;
         if (stmt->type == NODE_OUTPUT) has_output = 1;
 
         if (sem_too_many) break;
     }
 
-    if (first_input_line && !has_output && !sem_too_many) {
-        sem_note(first_input_line, "program declares inputs but has no output statement");
+    if (first_input && !has_output && !sem_too_many) {
+        sem_note(first_input, "program declares inputs but has no output statement");
     }
 
     if (sem_error_count > 0) {
@@ -377,7 +384,8 @@ void semantic_check(Program *prog) {
             sem_errors[j + 1] = e;
         }
         for (int i = 0; i < sem_error_count; i++) {
-            fprintf(stderr, "Semantic error at line %d: %s\n", sem_errors[i].line, sem_errors[i].msg);
+            diag_print(stderr, "Semantic", sem_errors[i].line, sem_errors[i].col,
+                       sem_errors[i].len, sem_errors[i].msg);
         }
         if (sem_too_many) {
             fprintf(stderr, "Too many errors, stopping after %d.\n", MAX_SEM_ERRORS);

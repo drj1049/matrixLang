@@ -50,6 +50,8 @@ typedef struct {
     TokenType type;
     char text[TOKEN_TEXT_MAX]; /* raw lexeme, e.g. "A", "12", "add" */
     int line;
+    int col;                   /* column of its first character, counting from 1 */
+    int len;                   /* how many characters it spans (0 for end of input) */
 } Token;
 
 /* Load source into the lexer. Must be called before peek/advance. */

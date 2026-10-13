@@ -6,6 +6,7 @@
 /* ---- Internal lexer state ---- */
 static const char *src_ptr;   /* current read position in source */
 static int current_line;
+static const char *line_start; /* where the current line begins, to work out columns */
 static Token cached_token;    /* one-token lookahead buffer */
 static int has_cached;        /* whether cached_token is valid */
 
@@ -47,6 +48,7 @@ static void skip_whitespace_and_comments(void) {
         if (c == '\n') {
             current_line++;
             src_ptr++;
+            line_start = src_ptr;
         } else if (c == ' ' || c == '\t' || c == '\r') {
             src_ptr++;
         } else if (c == '#') {
@@ -62,6 +64,8 @@ static Token make_token(TokenType type, const char *start, int len) {
     Token t;
     t.type = type;
     t.line = current_line;
+    t.col = (int)(start - line_start) + 1;
+    t.len = len;
     if (len >= TOKEN_TEXT_MAX) len = TOKEN_TEXT_MAX - 1;
     memcpy(t.text, start, len);
     t.text[len] = '\0';
@@ -126,13 +130,20 @@ static Token scan_next_raw(void) {
         case ']': return make_token(TOK_RBRACKET, start, 1);
         case ',': return make_token(TOK_COMMA, start, 1);
         case ';': return make_token(TOK_SEMICOLON, start, 1);
-        default:  return make_token(TOK_UNKNOWN, start, 1);
+        default:
+            /* keep a multi-byte character (UTF-8) together as one unknown token,
+             * so an error message never shows half of a character */
+            if ((unsigned char)c >= 0xC0) {
+                while (((unsigned char)*src_ptr & 0xC0) == 0x80) src_ptr++;
+            }
+            return make_token(TOK_UNKNOWN, start, (int)(src_ptr - start));
     }
 }
 
 void lex_init(const char *src) {
     src_ptr = src;
     current_line = 1;
+    line_start = src;
     has_cached = 0;
 }
 

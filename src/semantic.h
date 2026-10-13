@@ -20,8 +20,9 @@
  * Every statement is checked, even after an error in an earlier one. A
  * statement whose assignment failed marks its variable as bad, so uses of it
  * further down are skipped without extra messages. At the end all errors
- * found (up to 20) are printed to stderr, one "Semantic error at line N: ..."
- * line each, and the program exits(1).
+ * found (up to 20) are printed to stderr, each as a "Semantic error at line N,
+ * column M: ..." line followed by the source line and a caret (see diag.h), and the
+ * program exits(1).
  */
 void semantic_check(Program *prog);
 

@@ -1,0 +1,10 @@
+Semantic error at line 4, column 7: cannot multiply 2x2 by 1x3 (inner dimensions must match)
+ 4 | C = A * B
+   |       ^
+Semantic error at line 6, column 13: inverse requires a square matrix, got 1x3
+ 6 | E = inverse(B)
+   |             ^
+Semantic error at line 7, column 5: undefined variable 'X'
+ 7 | F = X + A
+   |     ^
+3 errors found.

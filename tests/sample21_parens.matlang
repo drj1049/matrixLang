@@ -1,0 +1,27 @@
+# parentheses group an expression, so + and - can sit inside a product
+A = [[1,2],[3,4]]
+B = [[0,1],[1,0]]
+C = [[2,0],[0,2]]
+
+P = (A + B) * C
+print(P)
+
+# the same product, grouped the other way: the answer must not change
+Q = A * (B * C)
+R = (A * B) * C
+print(Q)
+print(R)
+
+# numbers and minus signs work on a group
+S = 2 * (A - B) * 3
+T = -(A + B) + C
+print(S)
+print(T)
+
+# a group on the right of a minus keeps its own sign
+U = A - (B - C)
+V = ((A * B) * C) + (A * (B * C))
+W = (A)
+print(U)
+print(V)
+print(W)

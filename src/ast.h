@@ -30,6 +30,8 @@ typedef enum {
 typedef struct ASTNode {
     NodeType type;
     int line;
+    int col;    /* where this node starts on its line (counting from 1), 0 if unknown */
+    int len;    /* how many characters to underline when reporting an error on it */
 
     /* NODE_IDENTIFIER, NODE_INPUT, NODE_OUTPUT */
     char name[AST_NAME_MAX];
@@ -89,6 +91,10 @@ ASTNode *ast_new_assign(const char *target, ASTNode *value, int line);
 ASTNode *ast_new_print(const char *target, int line);
 ASTNode *ast_new_input(const char *name, int rows, int cols, int line);
 ASTNode *ast_new_output(const char *name, int line);
+
+/* Records where a node sits in the source, so errors about it can point at
+ * the right place. Returns the node, so it can wrap a constructor call. */
+ASTNode *ast_at(ASTNode *node, int col, int len);
 
 /* Recursively frees a node and everything it owns. */
 void ast_free(ASTNode *node);

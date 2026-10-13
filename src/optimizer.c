@@ -139,6 +139,45 @@ static void best_str(ASTNode **ops, int split[MAXN][MAXN], int i, int j, char *b
     app(buf, cap, ")");
 }
 
+ASTNode *optimize_expr(ASTNode *node);
+
+/* Reorders one multiply chain. Returns the new tree, or NULL when the chain
+ * has fewer than three matrices (nothing to reorder). This is a function of
+ * its own because its tables are large, and optimize_expr recurses once per
+ * operator: a long sum must not pay for those tables at every level. */
+static ASTNode *optimize_chain(ASTNode *node) {
+    ASTNode *ops[MAXN];
+    int n = 0;
+    flatten(node, ops, &n);
+    if (n < 3) return NULL;
+
+    for (int i = 0; i < n; i++)
+        ops[i] = optimize_expr(ops[i]);
+
+    int p[MAXN];
+    p[0] = ops[0]->result_rows;
+    for (int i = 0; i < n; i++)
+        p[i + 1] = ops[i]->result_cols;
+
+    int split[MAXN][MAXN];
+    long long best = mcm(p, n, split);
+
+    if (report_out) {
+        char wtxt[2048] = "", btxt[2048] = "";
+        written_str(node, wtxt, sizeof wtxt);
+        best_str(ops, split, 1, n, btxt, sizeof btxt);
+        fprintf(report_out, "CHAIN\t%d\t", node->line);
+        for (int i = 0; i < n; i++)
+            fprintf(report_out, "%s%s:%dx%d", i ? "," : "", label(ops[i]),
+                    ops[i]->result_rows, ops[i]->result_cols);
+        fprintf(report_out, "\t%s\t%lld\t%s\t%lld\n", wtxt, written_cost(node), btxt, best);
+    }
+
+    ASTNode *root = build(ops, split, 1, n, node->line);
+    free_shells(node);
+    return root;
+}
+
 ASTNode *optimize_expr(ASTNode *node) {
     if (node == NULL) return NULL;
 
@@ -146,37 +185,8 @@ ASTNode *optimize_expr(ASTNode *node) {
                 || (node->type == NODE_FUNC_CALL && node->func_kind == TOK_MULTIPLY);
 
     if (is_chain) {
-        ASTNode *ops[MAXN];
-        int n = 0;
-        flatten(node, ops, &n);
-
-        if (n >= 3) {
-            for (int i = 0; i < n; i++)
-                ops[i] = optimize_expr(ops[i]);
-
-            int p[MAXN];
-            p[0] = ops[0]->result_rows;
-            for (int i = 0; i < n; i++)
-                p[i + 1] = ops[i]->result_cols;
-
-            int split[MAXN][MAXN];
-            long long best = mcm(p, n, split);
-
-            if (report_out) {
-                char wtxt[2048] = "", btxt[2048] = "";
-                written_str(node, wtxt, sizeof wtxt);
-                best_str(ops, split, 1, n, btxt, sizeof btxt);
-                fprintf(report_out, "CHAIN\t%d\t", node->line);
-                for (int i = 0; i < n; i++)
-                    fprintf(report_out, "%s%s:%dx%d", i ? "," : "", label(ops[i]),
-                            ops[i]->result_rows, ops[i]->result_cols);
-                fprintf(report_out, "\t%s\t%lld\t%s\t%lld\n", wtxt, written_cost(node), btxt, best);
-            }
-
-            ASTNode *root = build(ops, split, 1, n, node->line);
-            free_shells(node);
-            return root;
-        }
+        ASTNode *root = optimize_chain(node);
+        if (root) return root;
     }
 
     if (node->type == NODE_BINOP) {

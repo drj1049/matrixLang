@@ -9,10 +9,10 @@ HDRS = $(wildcard src/*.h)
 STAGES = lexer parser semantic optimizer optimizer_prog tac interp
 BINS   = build/compiler $(STAGES:%=build/%_test)
 
-GOOD = sample1 sample4_chain sample10_gen sample13_scale sample16_cse sample17_algebra
+GOOD = sample1 sample4_chain sample10_gen sample13_scale sample16_cse sample17_algebra sample21_parens sample23_paren_chain
 BAD  = sample2_bad sample3_undefined sample7_bad_input sample8_bad_output sample11_bad_size sample14_bad_number
 
-.PHONY: all test fuzz run ui clean
+.PHONY: all test fuzz sanitize run ui clean
 
 all: $(BINS)
 
@@ -72,11 +72,13 @@ test: all
 		if [ "$$a" -lt "$$b" ]; then echo "PASS $$s: the TAC optimizer cut $$b matrix operations to $$a"; \
 		else echo "FAIL $$s: the TAC optimizer removed nothing ($$b -> $$a)"; exit 1; fi; \
 	done
-	@if cmp -s build/sample4_chain.c build/sample4_chain.O0.c; then \
-		echo "FAIL -O0 made no difference to the sample4_chain code"; exit 1; \
-	else \
-		echo "PASS -O0 changes the multiplication order in sample4_chain"; \
-	fi
+	@for s in sample4_chain sample23_paren_chain; do \
+		if cmp -s build/$$s.c build/$$s.O0.c; then \
+			echo "FAIL -O0 made no difference to the $$s code"; exit 1; \
+		else \
+			echo "PASS -O0 changes the multiplication order in $$s"; \
+		fi; \
+	done
 	@./build/compiler tests/sample5_func.matlang build/sample5_func.c && \
 	./build/compiler tests/sample6_alias.matlang build/sample6_alias.c alias_copy && \
 	./build/compiler tests/sample12_gen_func.matlang build/sample12_gen_func.c gen_func && \
@@ -100,11 +102,20 @@ test: all
 		if [ "$$n" -ge 3 ]; then echo "PASS $$s (reported $$n errors in one run)"; \
 		else echo "FAIL $$s (reported $$n errors, wanted 3)"; exit 1; fi; \
 	done
+	@for s in sample18_many_errors sample19_many_sem_errors sample22_paren_bad sample24_caret_edge; do \
+		./build/compiler tests/$$s.matlang build/$$s.c 2> build/$$s.err.txt; \
+		if diff build/$$s.err.txt tests/$$s.expected > /dev/null; then \
+			echo "PASS $$s (error messages and carets match tests/$$s.expected)"; \
+		else \
+			echo "FAIL $$s (error text differs from tests/$$s.expected):"; \
+			diff build/$$s.err.txt tests/$$s.expected; exit 1; \
+		fi; \
+	done
 	@for s in $(BAD); do \
 		if ./build/compiler tests/$$s.matlang build/$$s.c 2> build/$$s.err.txt; then \
 			echo "FAIL $$s (should have been rejected)"; exit 1; \
 		else \
-			echo "PASS $$s (rejected: $$(cat build/$$s.err.txt))"; \
+			echo "PASS $$s (rejected: $$(head -1 build/$$s.err.txt))"; \
 		fi; \
 	done
 
@@ -113,6 +124,18 @@ test: all
 N ?= 200
 fuzz: all
 	python3 tests/fuzz.py $(N) $(SEED)
+
+# memory and undefined-behaviour checks: builds the compiler with sanitizers
+# and runs it over every sample, good and bad: make sanitize
+sanitize: | build
+	$(CC) -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -Isrc tests/codegen_test.c $(SRCS) -o build/compiler_asan $(LDLIBS)
+	@fail=0; for f in tests/sample*.matlang; do \
+		ASAN_OPTIONS=detect_leaks=0 ./build/compiler_asan $$f build/san.c 2> build/san.err.txt; rc=$$?; \
+		if [ $$rc -gt 1 ] || grep -q -E 'Sanitizer|runtime error' build/san.err.txt; then \
+			echo "FAIL $$f"; head -5 build/san.err.txt; fail=1; \
+		fi; \
+	done; \
+	if [ $$fail = 0 ]; then echo "PASS sanitizers: no problems in $$(ls tests/sample*.matlang | wc -l | tr -d ' ') samples"; else exit 1; fi
 
 # local web page: make ui, then open http://localhost:8000
 ui: build/compiler build/tac_test build/optimizer_prog_test

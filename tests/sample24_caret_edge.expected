@@ -1,0 +1,7 @@
+Parse error at line 2, column 9: expected a matrix name, a matrix, a number or '(' (got 'print' on line 3)
+ 2 | 	B = A +
+   | 	       ^
+Parse error at line 3, column 8: expected ')' to close print(...) (reached the end of the program)
+ 3 | print(A
+   |        ^
+2 errors found.

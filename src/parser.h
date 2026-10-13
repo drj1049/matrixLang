@@ -15,8 +15,10 @@ typedef struct {
  * Internally calls lex_init() on src, so the caller doesn't need to
  * touch the lexer directly. A syntax error does not stop the parse: it is
  * recorded, the parser skips to the next statement and carries on, and at the
- * end every error found (up to 20) is printed to stderr, one
- * "Parse error at line N: ..." line each, and the program exits(1).
+ * end every error found (up to 20) is printed to stderr, each as a
+ * "Parse error at line N, column M: ..." line followed by the source line and
+ * a caret (see diag.h), and the program exits(1). The text of src is copied
+ * for diag.h, so the semantic checker can print carets later as well.
  */
 Program parse_program(const char *src);
 

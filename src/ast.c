@@ -10,6 +10,12 @@ static ASTNode *ast_alloc(NodeType type, int line) {
     return n;
 }
 
+ASTNode *ast_at(ASTNode *node, int col, int len) {
+    node->col = col;
+    node->len = len;
+    return node;
+}
+
 ASTNode *ast_new_identifier(const char *name, int line) {
     ASTNode *n = ast_alloc(NODE_IDENTIFIER, line);
     strncpy(n->name, name, AST_NAME_MAX - 1);

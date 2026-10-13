@@ -156,6 +156,20 @@ class Expr:
         return acc
 
 
+class Group:
+    """a parenthesized expression, used wherever a matrix factor can go"""
+    kind = "group"
+
+    def __init__(self, expr):
+        self.expr = expr
+
+    def render(self):
+        return "(" + self.expr.render() + ")"
+
+    def value(self, env):
+        return self.expr.value(env)
+
+
 class Call:
     """add / subtract / multiply of 2 or 3 names, or transpose / inverse of one"""
     def __init__(self, fn, names):
@@ -192,8 +206,21 @@ def upper_unit(x):
     return dims(x) == (2, 2) and x[0][0] == 1 and x[1][0] == 0 and x[1][1] == 1
 
 
-def pick_factor(rng, env, need_rows=None, need_cols=None):
+def build_group(rng, env, r, c, depth):
+    """a parenthesized expression of exactly r x c"""
+    first = build_term(rng, env, want_dims=(r, c), depth=depth + 1)
+    rest = []
+    for _ in range(rng.choice([0, 0, 1, 1, 2])):
+        rest.append((rng.choice("+-"), build_term(rng, env, want_dims=(r, c), depth=depth + 1)))
+    return Group(Expr(first, rest))
+
+
+def pick_factor(rng, env, need_rows=None, need_cols=None, depth=0):
     """a factor with the wanted number of rows (and columns if given)"""
+    if depth < 2 and rng.random() < 0.2:
+        r = need_rows if need_rows is not None else (2 if rng.random() < 0.6 else rng.randint(1, 3))
+        c = need_cols if need_cols is not None else (2 if rng.random() < 0.6 else rng.randint(1, 3))
+        return build_group(rng, env, r, c, depth)
     options = []
     for n, m in env.items():
         r, c = dims(m)
@@ -213,7 +240,7 @@ def pick_factor(rng, env, need_rows=None, need_cols=None):
     return rng.choice(options)
 
 
-def build_term(rng, env, want_dims=None):
+def build_term(rng, env, want_dims=None, depth=0):
     n_mats = rng.choice([1, 1, 2, 2, 3, 4])
     items = []
     if want_dims is not None:
@@ -223,7 +250,7 @@ def build_term(rng, env, want_dims=None):
     cur_rows = rows
     for k in range(n_mats):
         last = k == n_mats - 1
-        f = pick_factor(rng, env, need_rows=cur_rows, need_cols=cols if last else None)
+        f = pick_factor(rng, env, need_rows=cur_rows, need_cols=cols if last else None, depth=depth)
         m = f.value(env)
         items.append(Item(factor=f, neg=rng.random() < 0.15))
         cur_rows = dims(m)[1]

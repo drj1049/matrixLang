@@ -1,0 +1,10 @@
+Parse error at line 3, column 14: a size must be between 1 and 10000 (got '0')
+ 3 | B = identity(0)
+   |              ^
+Parse error at line 4, column 15: expected ']' to close matrix literal (got 'print' on line 5)
+ 4 | C = A * [[1,2]
+   |               ^
+Parse error at line 6, column 12: expected ',' between the rows and columns in zeros(rows, cols) (got ')')
+ 6 | D = zeros(2)
+   |            ^
+3 errors found.

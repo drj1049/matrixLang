@@ -1,0 +1,6 @@
+# written the slow way: (B x C) is a 4x4 matrix before it meets A
+A = [[1,2,3,4]]
+B = [[1],[2],[3],[4]]
+C = [[1,0,2,1]]
+X = A * (B * C)
+print(X)

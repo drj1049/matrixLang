@@ -1,0 +1,22 @@
+name: CI
+
+# every push and pull request builds the compiler and runs all the checks
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and run every check
+        run: make test
+
+      - name: Random programs (compiler against Python)
+        run: make fuzz N=100 SEED=1
+
+      - name: Memory and undefined-behaviour checks
+        run: make sanitize

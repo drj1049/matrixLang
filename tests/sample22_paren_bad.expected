@@ -1,0 +1,13 @@
+Parse error at line 3, column 11: expected ')' to close the parenthesis (got 'S' on line 4)
+ 3 | R = (A + B
+   |           ^
+Parse error at line 4, column 10: expected a statement (assignment, print, input or output) (got ')')
+ 4 | S = A + B)
+   |          ^
+Parse error at line 5, column 6: expected a matrix name, a matrix, a number or '(' (got ')')
+ 5 | T = ()
+   |      ^
+Parse error at line 6, column 6: a number must be multiplied with a matrix (for example 2 * A)
+ 6 | U = (2) * A
+   |      ^
+4 errors found.

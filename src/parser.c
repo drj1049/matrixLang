@@ -6,6 +6,7 @@
 #include <stdarg.h>
 #include "parser.h"
 #include "lexer.h"
+#include "diag.h"
 
 /* ---- Error handling ----
  * A syntax error does not stop the compiler straight away. It is written
@@ -20,6 +21,8 @@
 
 typedef struct {
     int line;
+    int col;
+    int len;
     char msg[256];
 } ParseError;
 
@@ -28,14 +31,27 @@ static int error_count;
 static int too_many_errors;
 static jmp_buf stmt_jmp;
 static int stmt_start_line;   /* line where the statement being parsed began */
+static Token last_tok;        /* the token consumed most recently (line 0 if none yet) */
+static int nest_depth;        /* how deep the unary minus / parenthesis nesting is right now */
 
-static void fail_at(int line, const char *fmt, ...) {
+#define MAX_NEST 200          /* keeps the recursive parser from overflowing the stack */
+#define MAX_OPS 2000          /* operators in one statement: bounds how deep the tree gets */
+static int stmt_ops;          /* operators seen so far in the statement being parsed */
+
+/* the only place the parser consumes tokens, so last_tok is always right */
+static Token advance(void) {
+    last_tok = lex_advance();
+    return last_tok;
+}
+
+/* write an error down (where it points and what it says), then jump back to
+ * the statement loop */
+static void vfail(int line, int col, int len, const char *fmt, va_list args) {
     if (error_count < MAX_ERRORS) {
-        va_list args;
-        va_start(args, fmt);
         errors[error_count].line = line;
+        errors[error_count].col = col;
+        errors[error_count].len = len;
         vsnprintf(errors[error_count].msg, sizeof errors[error_count].msg, fmt, args);
-        va_end(args);
         error_count++;
     } else {
         too_many_errors = 1;
@@ -43,9 +59,53 @@ static void fail_at(int line, const char *fmt, ...) {
     longjmp(stmt_jmp, 1);
 }
 
+/* an error that points at one token */
+static void fail_tok(Token t, const char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    vfail(t.line, t.col, t.len > 0 ? t.len : 1, fmt, args);
+    va_end(args);
+}
+
+/* an error that points from `first` up to the token consumed last, when that
+ * is all on one line */
+static void fail_span(Token first, const char *fmt, ...) {
+    int len = first.len;
+    if (last_tok.line == first.line && last_tok.col + last_tok.len > first.col) {
+        len = last_tok.col + last_tok.len - first.col;
+    }
+    va_list args;
+    va_start(args, fmt);
+    vfail(first.line, first.col, len > 0 ? len : 1, fmt, args);
+    va_end(args);
+}
+
+/* "expected X" errors. When the wrong token is on a later line (or the program
+ * has ended), what is missing belongs at the end of the previous token, so
+ * that is where the error points. Otherwise it points at the wrong token. */
 static void parse_error(const char *msg, Token got) {
-    if (got.type == TOK_EOF) fail_at(got.line, "%s (reached the end of the program)", msg);
-    else                     fail_at(got.line, "%s (got '%s')", msg, got.text);
+    int after_prev = last_tok.line > 0 && (got.type == TOK_EOF || got.line > last_tok.line);
+    char text[256];
+    if (got.type == TOK_EOF)
+        snprintf(text, sizeof text, "%s (reached the end of the program)", msg);
+    else if (after_prev)
+        snprintf(text, sizeof text, "%s (got '%s' on line %d)", msg, got.text, got.line);
+    else
+        snprintf(text, sizeof text, "%s (got '%s')", msg, got.text);
+
+    if (after_prev) {
+        Token at = last_tok;
+        at.col = last_tok.col + last_tok.len;
+        at.len = 1;
+        fail_tok(at, "%s", text);
+    }
+    fail_tok(got, "%s", text);
+}
+
+/* an error that always points at the token itself, however it is placed */
+static void parse_error_at(const char *msg, Token got) {
+    if (got.type == TOK_EOF) fail_tok(got, "%s (reached the end of the program)", msg);
+    else                     fail_tok(got, "%s (got '%s')", msg, got.text);
 }
 
 /* Consumes the current token if it matches `type`, else reports an error.
@@ -53,14 +113,14 @@ static void parse_error(const char *msg, Token got) {
 static Token expect(TokenType type, const char *what) {
     Token t = lex_peek();
     if (t.type != type) parse_error(what, t);
-    return lex_advance();
+    return advance();
 }
 
 /* ---- Forward declarations for the recursive-descent functions ---- */
 static ASTNode *parse_expr(void);      /* term (('+'|'-') term)* */
 static ASTNode *parse_term(void);      /* unary ('*' unary)* */
 static ASTNode *parse_unary(void);     /* '-' unary | NUMBER | factor */
-static ASTNode *parse_factor(void);    /* ID | matrixLiteral | matrixGen */
+static ASTNode *parse_factor(void);    /* ID | matrixLiteral | matrixGen | '(' expr ')' */
 static ASTNode *parse_matrix_literal(void);
 static ASTNode *parse_matrix_gen(void);
 static ASTNode *parse_func_call(void);
@@ -77,7 +137,7 @@ static int is_func_keyword(TokenType t) {
  * same column count (checked here, since a ragged matrix is never valid).
  */
 static ASTNode *parse_matrix_literal(void) {
-    int line = lex_peek().line;
+    Token first = lex_peek();
     expect(TOK_LBRACKET, "expected '[' to start matrix literal");
 
     double **rows = NULL;
@@ -85,6 +145,7 @@ static ASTNode *parse_matrix_literal(void) {
     int col_count = -1; /* unset until first row */
 
     do {
+        Token row_start = lex_peek();
         expect(TOK_LBRACKET, "expected '[' to start a matrix row");
 
         double *row_values = NULL;
@@ -93,7 +154,7 @@ static ASTNode *parse_matrix_literal(void) {
         do {
             int negative = 0;
             if (lex_peek().type == TOK_MINUS) {
-                lex_advance();
+                advance();
                 negative = 1;
             }
             Token num = expect(TOK_NUMBER, "expected a number inside matrix row");
@@ -102,25 +163,27 @@ static ASTNode *parse_matrix_literal(void) {
             row_values = realloc(row_values, sizeof(double) * this_row_cols);
             /* "-0" stays 0, so it never prints as -0 */
             row_values[this_row_cols - 1] = (negative && value != 0) ? -value : value;
-        } while (lex_peek().type == TOK_COMMA && (lex_advance(), 1));
+        } while (lex_peek().type == TOK_COMMA && (advance(), 1));
 
         expect(TOK_RBRACKET, "expected ']' to close matrix row");
 
         if (col_count == -1) {
             col_count = this_row_cols;
         } else if (this_row_cols != col_count) {
-            fail_at(line, "matrix rows have inconsistent lengths");
+            fail_span(row_start, "matrix rows have inconsistent lengths (this row has %d, the first has %d)",
+                      this_row_cols, col_count);
         }
 
         row_count++;
         rows = realloc(rows, sizeof(double *) * row_count);
         rows[row_count - 1] = row_values;
 
-    } while (lex_peek().type == TOK_COMMA && (lex_advance(), 1));
+    } while (lex_peek().type == TOK_COMMA && (advance(), 1));
 
     expect(TOK_RBRACKET, "expected ']' to close matrix literal");
 
-    return ast_new_matrix_literal(rows, row_count, col_count, line);
+    int len = (last_tok.line == first.line) ? last_tok.col + last_tok.len - first.col : first.len;
+    return ast_at(ast_new_matrix_literal(rows, row_count, col_count, first.line), first.col, len);
 }
 
 /* One size inside identity(...) / zeros(...): a whole number from 1 up to
@@ -131,18 +194,18 @@ static ASTNode *parse_matrix_literal(void) {
 static int parse_size(const char *what) {
     Token t = expect(TOK_NUMBER, what);
     if (strchr(t.text, '.')) {
-        fail_at(t.line, "a size must be a whole number (got '%s')", t.text);
+        fail_tok(t, "a size must be a whole number (got '%s')", t.text);
     }
     long v = strtol(t.text, NULL, 10);
     if (v < 1 || v > MAX_GEN_DIM) {
-        fail_at(t.line, "a size must be between 1 and %d (got '%s')", MAX_GEN_DIM, t.text);
+        fail_tok(t, "a size must be between 1 and %d (got '%s')", MAX_GEN_DIM, t.text);
     }
     return (int)v;
 }
 
 /* matrixGen -> IDENTITY '(' NUMBER ')' | ZEROS '(' NUMBER ',' NUMBER ')' */
 static ASTNode *parse_matrix_gen(void) {
-    Token kw = lex_advance();
+    Token kw = advance();
     expect(TOK_LPAREN, "expected '(' after function name");
 
     int rows, cols;
@@ -156,17 +219,19 @@ static ASTNode *parse_matrix_gen(void) {
     expect(TOK_RPAREN, "expected ')' to close function call");
 
     if ((long)rows * cols > MAX_GEN_CELLS) {
-        fail_at(kw.line, "a %dx%d matrix is too large (limit is %ld elements)", rows, cols, MAX_GEN_CELLS);
+        fail_span(kw, "a %dx%d matrix is too large (limit is %ld elements)", rows, cols, MAX_GEN_CELLS);
     }
-    return ast_new_matrix_gen(kw.type, rows, cols, kw.line);
+    return ast_at(ast_new_matrix_gen(kw.type, rows, cols, kw.line), kw.col, kw.len);
 }
 
-/* factor -> ID | matrixLiteral | matrixGen */
+/* factor -> ID | matrixLiteral | matrixGen | '(' expr ')'
+ * A parenthesized expression is just its inner expression: the grouping
+ * lives in the shape of the tree, so no extra node is needed. */
 static ASTNode *parse_factor(void) {
     Token t = lex_peek();
     if (t.type == TOK_ID) {
-        lex_advance();
-        return ast_new_identifier(t.text, t.line);
+        advance();
+        return ast_at(ast_new_identifier(t.text, t.line), t.col, t.len);
     }
     if (t.type == TOK_LBRACKET) {
         return parse_matrix_literal();
@@ -174,7 +239,17 @@ static ASTNode *parse_factor(void) {
     if (t.type == TOK_IDENTITY || t.type == TOK_ZEROS) {
         return parse_matrix_gen();
     }
-    parse_error("expected an identifier, matrix literal or number", t);
+    if (t.type == TOK_LPAREN) {
+        advance();
+        if (++nest_depth > MAX_NEST) {
+            fail_tok(t, "expression is nested too deeply (limit is %d levels)", MAX_NEST);
+        }
+        ASTNode *inner = parse_expr();
+        expect(TOK_RPAREN, "expected ')' to close the parenthesis");
+        nest_depth--;
+        return inner;
+    }
+    parse_error("expected a matrix name, a matrix, a number or '('", t);
     return NULL; /* unreachable, silences compiler warning */
 }
 
@@ -184,26 +259,26 @@ static double clean_zero(double v) {
 }
 
 /* factor * matrix: scaling a scaled matrix just multiplies the two numbers */
-static ASTNode *make_scale(double factor, ASTNode *matrix, int line) {
+static ASTNode *make_scale(double factor, ASTNode *matrix, Token at) {
     if (matrix->type == NODE_SCALE) {
         matrix->number = clean_zero(matrix->number * factor);
         return matrix;
     }
-    return ast_new_scale(clean_zero(factor), matrix, line);
+    return ast_at(ast_new_scale(clean_zero(factor), matrix, at.line), at.col, at.len);
 }
 
 /* '-' applied to a number gives a number, applied to a matrix it scales by -1 */
-static ASTNode *negate(ASTNode *operand, int line) {
+static ASTNode *negate(ASTNode *operand, Token minus) {
     if (operand->type == NODE_NUMBER) {
         operand->number = clean_zero(-operand->number);
         return operand;
     }
-    return make_scale(-1.0, operand, line);
+    return make_scale(-1.0, operand, minus);
 }
 
 /* one '*' step. Number * number stays a number, number * matrix (either
  * way round) becomes a scale, matrix * matrix is a real matrix multiply. */
-static ASTNode *make_product(ASTNode *left, ASTNode *right, int line) {
+static ASTNode *make_product(ASTNode *left, ASTNode *right, Token op) {
     if (left->type == NODE_NUMBER && right->type == NODE_NUMBER) {
         left->number = clean_zero(left->number * right->number);
         ast_free(right);
@@ -212,26 +287,31 @@ static ASTNode *make_product(ASTNode *left, ASTNode *right, int line) {
     if (left->type == NODE_NUMBER) {
         double k = left->number;
         ast_free(left);
-        return make_scale(k, right, line);
+        return make_scale(k, right, op);
     }
     if (right->type == NODE_NUMBER) {
         double k = right->number;
         ast_free(right);
-        return make_scale(k, left, line);
+        return make_scale(k, left, op);
     }
-    return ast_new_binop('*', left, right, line);
+    return ast_at(ast_new_binop('*', left, right, op.line), op.col, op.len);
 }
 
 /* unary -> '-' unary | NUMBER | factor */
 static ASTNode *parse_unary(void) {
     Token t = lex_peek();
     if (t.type == TOK_MINUS) {
-        lex_advance();
-        return negate(parse_unary(), t.line);
+        advance();
+        if (++nest_depth > MAX_NEST) {
+            fail_tok(t, "expression is nested too deeply (limit is %d levels)", MAX_NEST);
+        }
+        ASTNode *operand = parse_unary();
+        nest_depth--;
+        return negate(operand, t);
     }
     if (t.type == TOK_NUMBER) {
-        lex_advance();
-        return ast_new_number(atof(t.text), t.line);
+        advance();
+        return ast_at(ast_new_number(atof(t.text), t.line), t.col, t.len);
     }
     return parse_factor();
 }
@@ -239,15 +319,16 @@ static ASTNode *parse_unary(void) {
 /* term -> unary ('*' unary)*
  * A number on its own is not a matrix, so a term must not end up as one. */
 static ASTNode *parse_term(void) {
-    int line = lex_peek().line;
+    Token first = lex_peek();
     ASTNode *left = parse_unary();
     while (lex_peek().type == TOK_STAR) {
-        Token op = lex_advance();
+        Token op = advance();
+        if (++stmt_ops > MAX_OPS) fail_tok(op, "expression is too long (limit is %d operators in one statement)", MAX_OPS);
         ASTNode *right = parse_unary();
-        left = make_product(left, right, op.line);
+        left = make_product(left, right, op);
     }
     if (left->type == NODE_NUMBER) {
-        fail_at(line, "a number must be multiplied with a matrix (for example 2 * A)");
+        fail_span(first, "a number must be multiplied with a matrix (for example 2 * A)");
     }
     return left;
 }
@@ -256,10 +337,11 @@ static ASTNode *parse_term(void) {
 static ASTNode *parse_expr(void) {
     ASTNode *left = parse_term();
     while (lex_peek().type == TOK_PLUS || lex_peek().type == TOK_MINUS) {
-        Token op = lex_advance();
+        Token op = advance();
+        if (++stmt_ops > MAX_OPS) fail_tok(op, "expression is too long (limit is %d operators in one statement)", MAX_OPS);
         ASTNode *right = parse_term();
         char op_char = (op.type == TOK_PLUS) ? '+' : '-';
-        left = ast_new_binop(op_char, left, right, op.line);
+        left = ast_at(ast_new_binop(op_char, left, right, op.line), op.col, op.len);
     }
     return left;
 }
@@ -271,7 +353,7 @@ static ASTNode *parse_expr(void) {
  * enforced here since it's part of the grammar shape, not just semantics.
  */
 static ASTNode *parse_func_call(void) {
-    Token kw = lex_advance(); /* the keyword token itself, e.g. TOK_ADD */
+    Token kw = advance(); /* the keyword token itself, e.g. TOK_ADD */
     expect(TOK_LPAREN, "expected '(' after function name");
 
     ASTNode **args = NULL;
@@ -281,19 +363,19 @@ static ASTNode *parse_func_call(void) {
         Token id = expect(TOK_ID, "expected an identifier argument");
         arg_count++;
         args = realloc(args, sizeof(ASTNode *) * arg_count);
-        args[arg_count - 1] = ast_new_identifier(id.text, id.line);
-    } while (lex_peek().type == TOK_COMMA && (lex_advance(), 1));
+        args[arg_count - 1] = ast_at(ast_new_identifier(id.text, id.line), id.col, id.len);
+    } while (lex_peek().type == TOK_COMMA && (advance(), 1));
 
     expect(TOK_RPAREN, "expected ')' to close function call");
 
     if ((kw.type == TOK_TRANSPOSE || kw.type == TOK_INVERSE) && arg_count != 1) {
-        fail_at(kw.line, "%s takes exactly 1 argument, got %d", kw.text, arg_count);
+        fail_span(kw, "%s takes exactly 1 argument, got %d", kw.text, arg_count);
     }
     if ((kw.type == TOK_ADD || kw.type == TOK_SUBTRACT || kw.type == TOK_MULTIPLY) && arg_count < 2) {
-        fail_at(kw.line, "%s needs at least 2 arguments, got %d", kw.text, arg_count);
+        fail_span(kw, "%s needs at least 2 arguments, got %d", kw.text, arg_count);
     }
 
-    return ast_new_func_call(kw.type, args, arg_count, kw.line);
+    return ast_at(ast_new_func_call(kw.type, args, arg_count, kw.line), kw.col, kw.len);
 }
 
 /* statement -> ID '=' (funcCall | expr)
@@ -305,15 +387,15 @@ static ASTNode *parse_statement(void) {
     Token t = lex_peek();
 
     if (t.type == TOK_PRINT) {
-        lex_advance();
+        advance();
         expect(TOK_LPAREN, "expected '(' after print");
         Token id = expect(TOK_ID, "expected an identifier inside print(...)");
         expect(TOK_RPAREN, "expected ')' to close print(...)");
-        return ast_new_print(id.text, t.line);
+        return ast_at(ast_new_print(id.text, t.line), id.col, id.len);
     }
 
     if (t.type == TOK_INPUT) {
-        lex_advance();
+        advance();
         Token id = expect(TOK_ID, "expected a matrix name after input");
         Token dims = expect(TOK_DIMS, "expected a size like 2x3 after the input name");
 
@@ -322,34 +404,34 @@ static ASTNode *parse_statement(void) {
         long rows = strtol(dims.text, &end, 10);
         long cols = strtol(end + 1, NULL, 10);
         if (rows < 1 || cols < 1 || rows > INT_MAX || cols > INT_MAX / rows) {
-            fail_at(dims.line, "invalid size '%s' for input '%s' "
-                               "(rows and columns must be at least 1, and not too large)",
-                    dims.text, id.text);
+            fail_tok(dims, "invalid size '%s' for input '%s' "
+                           "(rows and columns must be at least 1, and not too large)",
+                     dims.text, id.text);
         }
-        return ast_new_input(id.text, (int)rows, (int)cols, t.line);
+        return ast_at(ast_new_input(id.text, (int)rows, (int)cols, t.line), id.col, id.len);
     }
 
     if (t.type == TOK_OUTPUT) {
-        lex_advance();
+        advance();
         Token id = expect(TOK_ID, "expected a matrix name after output");
-        return ast_new_output(id.text, t.line);
+        return ast_at(ast_new_output(id.text, t.line), id.col, id.len);
     }
 
     if (t.type == TOK_ID) {
-        Token target = lex_advance();
+        Token target = advance();
         expect(TOK_EQUALS, "expected '=' after identifier");
 
         ASTNode *value = is_func_keyword(lex_peek().type)
                               ? parse_func_call()
                               : parse_expr();
 
-        return ast_new_assign(target.text, value, target.line);
+        return ast_at(ast_new_assign(target.text, value, target.line), target.col, target.len);
     }
 
     if (t.type == TOK_EQUALS) {
-        fail_at(t.line, "unexpected '=' (does the line above end with an operator?)");
+        fail_tok(t, "unexpected '=' (does the line above end with an operator?)");
     }
-    parse_error("expected a statement (assignment, print, input or output)", t);
+    parse_error_at("expected a statement (assignment, print, input or output)", t);
     return NULL; /* unreachable */
 }
 
@@ -362,13 +444,13 @@ static void skip_to_next_statement(void) {
         if (t.type == TOK_EOF) return;
         if (t.type == TOK_PRINT || t.type == TOK_INPUT || t.type == TOK_OUTPUT) return;
         if (t.type == TOK_ID && t.line > stmt_start_line) return;
-        lex_advance();
+        advance();
     }
 }
 
 static void report_errors_and_exit(void) {
     for (int i = 0; i < error_count; i++) {
-        fprintf(stderr, "Parse error at line %d: %s\n", errors[i].line, errors[i].msg);
+        diag_print(stderr, "Parse", errors[i].line, errors[i].col, errors[i].len, errors[i].msg);
     }
     if (too_many_errors) {
         fprintf(stderr, "Too many errors, stopping after %d.\n", MAX_ERRORS);
@@ -381,12 +463,16 @@ static void report_errors_and_exit(void) {
 /* program -> statement* (until EOF) */
 Program parse_program(const char *src) {
     lex_init(src);
+    diag_set_source(src);
     error_count = 0;
     too_many_errors = 0;
+    memset(&last_tok, 0, sizeof last_tok);
 
     Program prog = { NULL, 0 };
     while (lex_peek().type != TOK_EOF) {
         stmt_start_line = lex_peek().line;
+        nest_depth = 0;
+        stmt_ops = 0;
         if (setjmp(stmt_jmp) == 0) {
             ASTNode *stmt = parse_statement();
             prog.count++;
