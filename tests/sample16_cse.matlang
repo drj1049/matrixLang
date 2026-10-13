@@ -1,0 +1,9 @@
+# common subexpressions: A * B is worked out once and reused
+A = [[1,2],[3,4]]
+B = [[0,1],[1,0]]
+C = A * B
+D = A * B + C
+E = B + A
+F = A + B
+print(D)
+print(F)

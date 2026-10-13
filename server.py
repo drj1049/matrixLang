@@ -60,9 +60,17 @@ def build_tools():
         sys.exit("Could not build the compiler:\n" + p.stdout)
 
 
-def error_line(text):
-    m = re.search(r"line (\d+)", text, re.IGNORECASE)
-    return int(m.group(1)) if m else None
+def error_lines(text):
+    """Every source line the compiler complained about, in order, without repeats."""
+    found = re.findall(r"^(?:Parse|Semantic) error at line (\d+)", text, re.MULTILINE)
+    if not found:
+        m = re.search(r"line (\d+)", text, re.IGNORECASE)
+        found = [m.group(1)] if m else []
+    lines = []
+    for n in found:
+        if int(n) not in lines:
+            lines.append(int(n))
+    return lines
 
 
 def run_pipeline(code, optimize=True):
@@ -86,7 +94,8 @@ def run_pipeline(code, optimize=True):
             msg = (err or out).strip() or "The compiler stopped without a message."
             if rc < 0:
                 msg = "The compiler crashed on this program.\n" + msg
-            return {"ok": False, "error": msg, "line": error_line(msg)}
+            lines = error_lines(msg)
+            return {"ok": False, "error": msg, "line": lines[0] if lines else None, "lines": lines}
 
         with open(c_path) as f:
             c_code = f.read()
@@ -96,8 +105,14 @@ def run_pipeline(code, optimize=True):
                 header = f.read()
 
         rc, out, err = run([TAC_TOOL] + flag + [src])
-        tac = out.split("\n\n", 1)[1] if out.startswith("Three-address code:") and "\n\n" in out else out
+        tac_part, _, notes_part = out.partition("\n=== notes ===\n")
+        tac = tac_part.split("\n\n", 1)[1] if tac_part.startswith("Three-address code:") and "\n\n" in tac_part else tac_part
         tac = tac.strip("\n")
+        notes = []      # what the TAC optimizer reused or simplified
+        for ln in notes_part.splitlines():
+            f = ln.split("\t")
+            if len(f) == 3 and f[0] in ("REUSE", "REWRITE") and f[1].isdigit():
+                notes.append({"kind": f[0].lower(), "line": int(f[1]), "text": f[2]})
 
         before = after = ""
         chains = []
@@ -125,7 +140,7 @@ def run_pipeline(code, optimize=True):
 
         result = {"ok": True, "optimized": optimize, "mode": "function" if header else "program",
                   "c": c_code, "header": header, "tac": tac,
-                  "before": before, "after": after, "chains": chains, "output": None}
+                  "before": before, "after": after, "chains": chains, "notes": notes, "output": None}
 
         if not header:
             exe = os.path.join(tmp, "prog")

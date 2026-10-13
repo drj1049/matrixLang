@@ -1,0 +1,17 @@
+# algebraic rewrites: each marked line needs no real work
+A = [[1,2],[3,4]]
+P = [[1,3],[0,1]]
+B = A * identity(2)
+C = transpose(A)
+D = transpose(C)
+E = A + zeros(2,2)
+F = 1 * A
+G = 0 * A
+Q = inverse(P)
+R = inverse(Q)
+print(B)
+print(D)
+print(E)
+print(F)
+print(G)
+print(R)

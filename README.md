@@ -40,12 +40,14 @@ matrixLang/
     semantic.h semantic.c   dimension checking and symbol table
     tac.h      tac.c        three-address code generation
     optimizer.h optimizer.c matrix chain multiplication reordering (dynamic programming)
+    tacopt.h   tacopt.c     TAC optimizer: common subexpression reuse and algebraic rewrites
     interp.h   interp.c     executes TAC, does the actual matrix math
     codegen.h  codegen.c    turns TAC into C code (a main(), or a function plus a header)
     matrt.h                 small C runtime used by the generated code (tiled multiply etc.)
   tests/
     *_test.c                one driver per stage, plus codegen_test.c (the compiler itself)
     func_caller.c           calls the generated functions the way a real project would
+    fuzz.py                 random program tester (checks the compiler against Python)
     sample*.matlang         valid and deliberately broken programs
   Makefile                  make, make test, make run FILE=...
   LICENSE                   MIT
@@ -61,13 +63,71 @@ Source code goes through these stages, each one buildable and runnable on its ow
 3. **Semantic analysis** — checks matrix dimensions are compatible everywhere, annotates the AST with result dimensions
 4. **TAC generation** — converts the checked AST into three-address code
 5. **Optimizer** — reorders multiply chains so the fewest multiplications are done (runs after semantic analysis, before TAC)
-6. **Execution** — runs the TAC in an interpreter and prints real computed matrices
-7. **Code generation** — writes the TAC out as C, using a loop-tiled multiply for cache locality
+6. **TAC optimizer** — reuses repeated expressions and applies algebraic rewrites (runs on the TAC)
+7. **Execution** — runs the TAC in an interpreter and prints real computed matrices
+8. **Code generation** — writes the TAC out as C, using a loop-tiled multiply for cache locality
+
+## Grammar
+
+The parser is recursive descent with one token of lookahead (LL(1)). Every rule below is one function in `src/parser.c`.
+
+```
+program      -> statement* EOF
+statement    -> ID '=' ( funcCall | expr )
+              | 'print' '(' ID ')'
+              | 'input' ID DIMS
+              | 'output' ID
+
+funcCall     -> ( 'add' | 'subtract' | 'multiply' ) '(' ID ( ',' ID )+ ')'
+              | ( 'transpose' | 'inverse' ) '(' ID ')'
+
+expr         -> term ( ( '+' | '-' ) term )*
+term         -> unary ( '*' unary )*
+unary        -> '-' unary | NUMBER | factor
+factor       -> ID | matrixLiteral | matrixGen
+
+matrixGen    -> 'identity' '(' NUMBER ')'
+              | 'zeros' '(' NUMBER ',' NUMBER ')'
+matrixLiteral-> '[' row ( ',' row )* ']'
+row          -> '[' value ( ',' value )* ']'
+value        -> [ '-' ] NUMBER
+
+NUMBER       -> digit+ [ '.' digit+ ]
+DIMS         -> digit+ 'x' digit+          (for example 2x3)
+ID           -> ( letter | '_' ) ( letter | digit | '_' )*
+comment      -> '#' up to the end of the line
+```
+
+**Precedence and associativity** (tightest first):
+
+| Level | Operator | Associativity |
+|-------|----------|---------------|
+| 1 | unary `-` | right (`- - A` is `-(-A)`) |
+| 2 | `*` | left |
+| 3 | `+` `-` | left |
+
+So `A - B - C` is `(A - B) - C`, and `2 * A + B * C` is `(2 * A) + (B * C)`. There are no parentheses in expressions. The function calls (`add(...)`, `transpose(...)` and so on) are only allowed as the whole right-hand side of an assignment.
+
+Two rules are checked after parsing because the grammar alone cannot express them: a product may not end up as a bare number (`2 * 3` and `A + 5` are errors), and `ID`s named like keywords or `t0`, `t1`, ... are reserved.
+
+## Error recovery
+
+The compiler reports up to 20 errors in one run instead of stopping at the first. After a syntax error it skips ahead (panic mode) to the next `print`, `input`, `output` or a name at the start of a later line, and carries on parsing from there. The semantic checker does the same per statement. A variable whose definition failed is marked as bad, so later uses of it do not produce a pile of follow-up errors. The run ends with `N errors found.`; the web page marks every offending line in the gutter.
+
+## TAC optimizer
+
+After the TAC is generated, `tacopt.c` runs local value numbering over it: every value gets a number describing how it was computed, and a computation that was already done is replaced by a copy of the earlier result. Turn it off with `-O0`.
+
+- **Common subexpressions**: if `A * B` (or `A + B`, in either order) is computed twice, the second one reuses the first.
+- **Algebraic rewrites**: `A * identity(n)` and `identity(n) * A` become `A`; `A + zeros(...)` becomes `A`; `A * zeros(...)` becomes `zeros(...)` of the right size; `1 * A` becomes `A`; `0 * A` becomes `zeros(...)`; `transpose(transpose(A))` becomes `A`; `inverse(inverse(A))` becomes `A`; `transpose` or `inverse` of `identity` is `identity`.
+
+The `inverse(inverse(A))` rewrite is exact in maths, but with floating-point numbers `-O0` (which really inverts twice) can differ from the optimized result in the last digits.
 
 ## Quick start
 
 ```
 make test                             # build everything and run all checks
+make fuzz                             # test the compiler on random programs (make fuzz N=500 SEED=3)
 ./matlangc tests/sample1.matlang      # compile to C, build it, run it
 ./matlangc -O0 tests/sample4_chain.matlang   # same, with the optimizer switched off
 ```
@@ -108,13 +168,13 @@ gcc -Wall -o tests/semantic_test tests/semantic_test.c src/lexer.c src/ast.c src
 
 **TAC generation**
 ```
-gcc -Wall -o tests/tac_test tests/tac_test.c src/lexer.c src/ast.c src/parser.c src/semantic.c src/tac.c -Isrc
+gcc -Wall -o tests/tac_test tests/tac_test.c src/lexer.c src/ast.c src/parser.c src/semantic.c src/optimizer.c src/tac.c src/tacopt.c -Isrc
 ./tests/tac_test tests/sample1.matlang
 ```
 
 **Full execution**
 ```
-gcc -Wall -o tests/interp_test tests/interp_test.c src/lexer.c src/ast.c src/parser.c src/semantic.c src/tac.c src/interp.c -Isrc -lm
+gcc -Wall -o tests/interp_test tests/interp_test.c src/lexer.c src/ast.c src/parser.c src/semantic.c src/optimizer.c src/tac.c src/tacopt.c src/interp.c -Isrc -lm
 ./tests/interp_test tests/sample1.matlang
 ```
 
@@ -172,6 +232,6 @@ Rules:
 
 ## Status
 
-Working: lexer, parser, AST, semantic analysis with symbol table, negative numbers in matrix literals, `identity` and `zeros`, scalar multiplication and unary minus, an `-O0` switch for the optimizer, matrix chain multiplication optimizer, three-address code generation, an interpreter that performs real matrix arithmetic including inversion via Gauss-Jordan elimination, and C code generation (standalone program or callable function) with a loop-tiled multiply.
+Working: lexer, parser, AST, a written grammar, reporting several errors at once, semantic analysis with symbol table, negative numbers in matrix literals, `identity` and `zeros`, scalar multiplication and unary minus, an `-O0` switch for the optimizer, matrix chain multiplication optimizer, common subexpression reuse and algebraic rewrites on the TAC, three-address code generation, an interpreter that performs real matrix arithmetic including inversion via Gauss-Jordan elimination, and C code generation (standalone program or callable function) with a loop-tiled multiply.
 
-`make test` checks that compiled output matches the interpreter (with the optimizer on and off), that the generated functions return correct, freshly allocated results, and that the broken samples are rejected.
+`make test` checks that compiled output matches the interpreter (with the optimizer on and off), that the generated functions return correct, freshly allocated results, and that the broken samples are rejected. `make fuzz` generates random programs and checks every stage (interpreter and compiled C, optimizer on and off) against an independent Python calculation.

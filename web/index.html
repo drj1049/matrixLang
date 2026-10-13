@@ -55,7 +55,7 @@
   #gutter { width: 44px; flex: none; padding: 12px 8px 12px 0; text-align: right; color: var(--muted); user-select: none; overflow: hidden; border-right: 1px solid var(--border); font-size: 13px; line-height: 20px; }
   #gutter div.err { color: var(--err); font-weight: 700; }
   #code { flex: 1; min-width: 0; resize: none; border: 0; outline: 0; background: transparent; color: var(--text); padding: 12px; font-size: 13px; line-height: 20px; white-space: pre; overflow: auto; tab-size: 2; }
-  #errbar { position: absolute; left: 0; right: 0; height: 20px; background: var(--err-bg); pointer-events: none; display: none; border-left: 3px solid var(--err); }
+  #errbar, .errbar-x { position: absolute; left: 0; right: 0; height: 20px; background: var(--err-bg); pointer-events: none; display: none; border-left: 3px solid var(--err); }
   .statusbar { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-top: 1px solid var(--border); font-size: 12.5px; color: var(--muted); min-height: 36px; }
   .statusbar .ok { color: var(--ok); }
   #error { display: none; margin: 0; padding: 10px 12px; border-top: 1px solid var(--err); background: var(--err-bg); color: var(--err); white-space: pre-wrap; font-size: 13px; }
@@ -84,6 +84,11 @@
   .chain { border: 1px solid var(--border); background: var(--panel-2); border-radius: 10px; padding: 12px 14px; margin: 0 0 12px; }
   .opt-toggle { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
   .opt-toggle input { accent-color: var(--accent); cursor: pointer; }
+  .note-row { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; padding: 6px 0; border-bottom: 1px solid var(--border); }
+  .note-line { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; min-width: 52px; }
+  .note-kind { font-size: 11.5px; font-weight: 650; padding: 1px 8px; border-radius: 10px; border: 1px solid var(--ok); color: var(--ok); }
+  .note-kind.reuse { border-color: var(--accent); color: var(--accent); }
+  .note-text { overflow-wrap: anywhere; font-size: 13px; }
   .chain-top { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
   .chain-line { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
   .chain-ops { font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
@@ -169,7 +174,7 @@
   var editor = $("#code"), gutter = $("#gutter"), errbar = $("#errbar");
   var errBox = $("#error"), statusEl = $("#status"), runBtn = $("#run");
   var samplesEl = $("#samples");
-  var errLine = null, last = null, active = "output";
+  var errLines = [], last = null, active = "output";
 
   function store(key, val) { try { if (val === undefined) return localStorage.getItem(key); localStorage.setItem(key, val); } catch (e) {} return null; }
 
@@ -180,18 +185,27 @@
     for (var i = 1; i <= n; i++) {
       var d = document.createElement("div");
       d.textContent = i;
-      if (i === errLine) d.className = "err";
+      if (errLines.indexOf(i) !== -1) d.className = "err";
       gutter.appendChild(d);
     }
     syncScroll();
   }
   function syncScroll() {
     gutter.scrollTop = editor.scrollTop;
-    if (errLine == null) { errbar.style.display = "none"; return; }
+    var extras = editor.parentNode.querySelectorAll(".errbar-x");
+    for (var x = 0; x < extras.length; x++) extras[x].parentNode.removeChild(extras[x]);
+    if (!errLines.length) { errbar.style.display = "none"; return; }
     errbar.style.display = "block";
-    errbar.style.top = (PAD + (errLine - 1) * LH - editor.scrollTop) + "px";
+    errbar.style.top = (PAD + (errLines[0] - 1) * LH - editor.scrollTop) + "px";
+    for (var k = 1; k < errLines.length; k++) {
+      var bar = document.createElement("div");
+      bar.className = "errbar-x";
+      bar.setAttribute("aria-hidden", "true");
+      bar.style.top = (PAD + (errLines[k] - 1) * LH - editor.scrollTop) + "px";
+      editor.parentNode.appendChild(bar);
+    }
   }
-  editor.addEventListener("input", function () { errLine = null; renderGutter(); store("matlang.code", editor.value); });
+  editor.addEventListener("input", function () { errLines = []; renderGutter(); store("matlang.code", editor.value); });
   editor.addEventListener("scroll", syncScroll);
   editor.addEventListener("keydown", function (e) {
     if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); run(); return; }
@@ -203,13 +217,14 @@
       editor.dispatchEvent(new Event("input"));
     }
   });
-  function setCode(code) { editor.value = code; errLine = null; hideError(); renderGutter(); store("matlang.code", code); }
+  function setCode(code) { editor.value = code; errLines = []; hideError(); renderGutter(); store("matlang.code", code); }
 
   /* ---------- messages ---------- */
-  function showError(msg, line) {
+  function showError(msg, lines) {
     errBox.textContent = msg; errBox.style.display = "block";
-    errLine = line || null; renderGutter();
-    statusEl.textContent = line ? "Stopped at line " + line : "Stopped";
+    errLines = lines || []; renderGutter();
+    statusEl.textContent = errLines.length > 1 ? "Stopped: " + errLines.length + " lines have errors"
+                         : errLines.length ? "Stopped at line " + errLines[0] : "Stopped";
   }
   function hideError() { errBox.style.display = "none"; errBox.textContent = ""; }
 
@@ -334,13 +349,13 @@
   function render(d) {
     last = d;
     if (!d.ok) {
-      showError(d.error || "Something went wrong.", d.line);
+      showError(d.error || "Something went wrong.", d.lines || (d.line ? [d.line] : []));
       ["#panel-output", "#panel-c", "#panel-tac", "#panel-opt"].forEach(function (id) {
         fill(id, [el("span", "empty", "Nothing to show: the program did not compile. See the message under the editor.")]);
       });
       return;
     }
-    hideError(); errLine = null; renderGutter();
+    hideError(); errLines = []; renderGutter();
 
     // Output
     if (d.mode === "function") {
@@ -372,6 +387,17 @@
       optNodes.push(el("h3", "opt-h", "Multiplication order"));
       d.chains.forEach(function (c) { optNodes.push(chainCard(c)); });
     }
+    if (d.notes && d.notes.length) {
+      optNodes.push(el("h3", "opt-h", "Reused and simplified"));
+      d.notes.forEach(function (n) {
+        var row = el("div", "note-row");
+        row.appendChild(el("span", "note-line", "Line " + n.line));
+        row.appendChild(el("span", "note-kind " + n.kind, n.kind === "reuse" ? "Reused" : "Simplified"));
+        row.appendChild(el("span", "note-text mono", n.text));
+        optNodes.push(row);
+      });
+      var spacer = el("div", null, ""); spacer.style.height = "16px"; optNodes.push(spacer);
+    }
     optNodes.push(el("h3", "opt-h", "Tree before and after"));
     if (off) optNodes.push(el("p", "note", "The optimizer is switched off, so the multiplications are compiled in exactly the order you wrote them. Tick Optimizer and Run again to see what it would change."));
     else if (same) optNodes.push(el("p", "note", "Nothing to reorder here: the optimizer only changes chains of three or more multiplications, and this tree is already in the cheapest order."));
@@ -387,7 +413,7 @@
     statusEl.textContent = "";
     var line = el("span", null);
     line.appendChild(el("span", "ok", "Compiled"));
-    line.appendChild(document.createTextNode(" as a C " + kind + " in " + d.ms + " ms" + (off ? " · optimizer off" : same ? "" : " · optimizer rewrote a multiply chain")));
+    line.appendChild(document.createTextNode(" as a C " + kind + " in " + d.ms + " ms" + (off ? " · optimizer off" : (same ? "" : " · optimizer rewrote a multiply chain") + (d.notes && d.notes.length ? " · " + d.notes.length + (d.notes.length === 1 ? " expression reused or simplified" : " expressions reused or simplified") : ""))));
     statusEl.appendChild(line);
   }
 
@@ -397,7 +423,7 @@
     fetch("/api/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: editor.value, optimize: $("#optimize").checked }) })
       .then(function (r) { return r.json(); })
       .then(render)
-      .catch(function () { showError("Cannot reach the server. Start it with:  python3 server.py", null); })
+      .catch(function () { showError("Cannot reach the server. Start it with:  python3 server.py", []); })
       .then(function () { runBtn.disabled = false; });
   }
   runBtn.addEventListener("click", run);

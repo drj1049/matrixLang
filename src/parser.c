@@ -2,20 +2,58 @@
 #include <stdlib.h>
 #include <string.h>
 #include <limits.h>
+#include <setjmp.h>
+#include <stdarg.h>
 #include "parser.h"
 #include "lexer.h"
 
-/* ---- Error helper ---- */
-static void parse_error(const char *msg, Token got) {
-    fprintf(stderr, "Parse error at line %d: %s (got '%s')\n", got.line, msg, got.text);
-    exit(1);
+/* ---- Error handling ----
+ * A syntax error does not stop the compiler straight away. It is written
+ * down, the parser jumps back to the statement loop (setjmp/longjmp), skips
+ * ahead to the start of the next statement ("panic mode" recovery) and keeps
+ * going, so one run can report several mistakes. When the whole program has
+ * been read, every error found is printed and the compiler exits.
+ * (A statement that failed may leave half-built nodes behind. They are not
+ * freed, because the compiler exits right after reporting.)
+ */
+#define MAX_ERRORS 20
+
+typedef struct {
+    int line;
+    char msg[256];
+} ParseError;
+
+static ParseError errors[MAX_ERRORS];
+static int error_count;
+static int too_many_errors;
+static jmp_buf stmt_jmp;
+static int stmt_start_line;   /* line where the statement being parsed began */
+
+static void fail_at(int line, const char *fmt, ...) {
+    if (error_count < MAX_ERRORS) {
+        va_list args;
+        va_start(args, fmt);
+        errors[error_count].line = line;
+        vsnprintf(errors[error_count].msg, sizeof errors[error_count].msg, fmt, args);
+        va_end(args);
+        error_count++;
+    } else {
+        too_many_errors = 1;
+    }
+    longjmp(stmt_jmp, 1);
 }
 
-/* Consumes the current token if it matches `type`, else reports an error. */
+static void parse_error(const char *msg, Token got) {
+    if (got.type == TOK_EOF) fail_at(got.line, "%s (reached the end of the program)", msg);
+    else                     fail_at(got.line, "%s (got '%s')", msg, got.text);
+}
+
+/* Consumes the current token if it matches `type`, else reports an error.
+ * A wrong token is left in place, so recovery can look at it. */
 static Token expect(TokenType type, const char *what) {
-    Token t = lex_advance();
+    Token t = lex_peek();
     if (t.type != type) parse_error(what, t);
-    return t;
+    return lex_advance();
 }
 
 /* ---- Forward declarations for the recursive-descent functions ---- */
@@ -71,8 +109,7 @@ static ASTNode *parse_matrix_literal(void) {
         if (col_count == -1) {
             col_count = this_row_cols;
         } else if (this_row_cols != col_count) {
-            fprintf(stderr, "Parse error at line %d: matrix rows have inconsistent lengths\n", line);
-            exit(1);
+            fail_at(line, "matrix rows have inconsistent lengths");
         }
 
         row_count++;
@@ -94,15 +131,11 @@ static ASTNode *parse_matrix_literal(void) {
 static int parse_size(const char *what) {
     Token t = expect(TOK_NUMBER, what);
     if (strchr(t.text, '.')) {
-        fprintf(stderr, "Parse error at line %d: a size must be a whole number (got '%s')\n",
-                t.line, t.text);
-        exit(1);
+        fail_at(t.line, "a size must be a whole number (got '%s')", t.text);
     }
     long v = strtol(t.text, NULL, 10);
     if (v < 1 || v > MAX_GEN_DIM) {
-        fprintf(stderr, "Parse error at line %d: a size must be between 1 and %d (got '%s')\n",
-                t.line, MAX_GEN_DIM, t.text);
-        exit(1);
+        fail_at(t.line, "a size must be between 1 and %d (got '%s')", MAX_GEN_DIM, t.text);
     }
     return (int)v;
 }
@@ -123,9 +156,7 @@ static ASTNode *parse_matrix_gen(void) {
     expect(TOK_RPAREN, "expected ')' to close function call");
 
     if ((long)rows * cols > MAX_GEN_CELLS) {
-        fprintf(stderr, "Parse error at line %d: a %dx%d matrix is too large (limit is %ld elements)\n",
-                kw.line, rows, cols, MAX_GEN_CELLS);
-        exit(1);
+        fail_at(kw.line, "a %dx%d matrix is too large (limit is %ld elements)", rows, cols, MAX_GEN_CELLS);
     }
     return ast_new_matrix_gen(kw.type, rows, cols, kw.line);
 }
@@ -216,9 +247,7 @@ static ASTNode *parse_term(void) {
         left = make_product(left, right, op.line);
     }
     if (left->type == NODE_NUMBER) {
-        fprintf(stderr, "Parse error at line %d: a number must be multiplied with a matrix "
-                        "(for example 2 * A)\n", line);
-        exit(1);
+        fail_at(line, "a number must be multiplied with a matrix (for example 2 * A)");
     }
     return left;
 }
@@ -258,14 +287,10 @@ static ASTNode *parse_func_call(void) {
     expect(TOK_RPAREN, "expected ')' to close function call");
 
     if ((kw.type == TOK_TRANSPOSE || kw.type == TOK_INVERSE) && arg_count != 1) {
-        fprintf(stderr, "Parse error at line %d: %s takes exactly 1 argument, got %d\n",
-                kw.line, kw.text, arg_count);
-        exit(1);
+        fail_at(kw.line, "%s takes exactly 1 argument, got %d", kw.text, arg_count);
     }
     if ((kw.type == TOK_ADD || kw.type == TOK_SUBTRACT || kw.type == TOK_MULTIPLY) && arg_count < 2) {
-        fprintf(stderr, "Parse error at line %d: %s needs at least 2 arguments, got %d\n",
-                kw.line, kw.text, arg_count);
-        exit(1);
+        fail_at(kw.line, "%s needs at least 2 arguments, got %d", kw.text, arg_count);
     }
 
     return ast_new_func_call(kw.type, args, arg_count, kw.line);
@@ -297,10 +322,9 @@ static ASTNode *parse_statement(void) {
         long rows = strtol(dims.text, &end, 10);
         long cols = strtol(end + 1, NULL, 10);
         if (rows < 1 || cols < 1 || rows > INT_MAX || cols > INT_MAX / rows) {
-            fprintf(stderr, "Parse error at line %d: invalid size '%s' for input '%s' "
-                            "(rows and columns must be at least 1, and not too large)\n",
-                    dims.line, dims.text, id.text);
-            exit(1);
+            fail_at(dims.line, "invalid size '%s' for input '%s' "
+                               "(rows and columns must be at least 1, and not too large)",
+                    dims.text, id.text);
         }
         return ast_new_input(id.text, (int)rows, (int)cols, t.line);
     }
@@ -322,20 +346,58 @@ static ASTNode *parse_statement(void) {
         return ast_new_assign(target.text, value, target.line);
     }
 
+    if (t.type == TOK_EQUALS) {
+        fail_at(t.line, "unexpected '=' (does the line above end with an operator?)");
+    }
     parse_error("expected a statement (assignment, print, input or output)", t);
     return NULL; /* unreachable */
+}
+
+/* After an error: skip to the first token that can begin a statement. print,
+ * input and output can only ever start one; a name on a later line than the
+ * broken statement started on is taken as the start of the next one. */
+static void skip_to_next_statement(void) {
+    for (;;) {
+        Token t = lex_peek();
+        if (t.type == TOK_EOF) return;
+        if (t.type == TOK_PRINT || t.type == TOK_INPUT || t.type == TOK_OUTPUT) return;
+        if (t.type == TOK_ID && t.line > stmt_start_line) return;
+        lex_advance();
+    }
+}
+
+static void report_errors_and_exit(void) {
+    for (int i = 0; i < error_count; i++) {
+        fprintf(stderr, "Parse error at line %d: %s\n", errors[i].line, errors[i].msg);
+    }
+    if (too_many_errors) {
+        fprintf(stderr, "Too many errors, stopping after %d.\n", MAX_ERRORS);
+    } else if (error_count > 1) {
+        fprintf(stderr, "%d errors found.\n", error_count);
+    }
+    exit(1);
 }
 
 /* program -> statement* (until EOF) */
 Program parse_program(const char *src) {
     lex_init(src);
+    error_count = 0;
+    too_many_errors = 0;
 
     Program prog = { NULL, 0 };
     while (lex_peek().type != TOK_EOF) {
-        prog.count++;
-        prog.statements = realloc(prog.statements, sizeof(ASTNode *) * prog.count);
-        prog.statements[prog.count - 1] = parse_statement();
+        stmt_start_line = lex_peek().line;
+        if (setjmp(stmt_jmp) == 0) {
+            ASTNode *stmt = parse_statement();
+            prog.count++;
+            prog.statements = realloc(prog.statements, sizeof(ASTNode *) * prog.count);
+            prog.statements[prog.count - 1] = stmt;
+        } else {
+            if (too_many_errors) break;
+            skip_to_next_statement();
+        }
     }
+    if (error_count > 0) report_errors_and_exit();
     return prog;
 }
 

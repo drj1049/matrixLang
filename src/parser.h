@@ -13,9 +13,10 @@ typedef struct {
 
 /* Tokenizes and parses the given source string into a Program.
  * Internally calls lex_init() on src, so the caller doesn't need to
- * touch the lexer directly. On a syntax error, prints a message to
- * stderr and exits -- matches how the lexer/earlier stages behave for now;
- * proper error recovery can be added later once the language is stable.
+ * touch the lexer directly. A syntax error does not stop the parse: it is
+ * recorded, the parser skips to the next statement and carries on, and at the
+ * end every error found (up to 20) is printed to stderr, one
+ * "Parse error at line N: ..." line each, and the program exits(1).
  */
 Program parse_program(const char *src);
 

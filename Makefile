@@ -9,10 +9,10 @@ HDRS = $(wildcard src/*.h)
 STAGES = lexer parser semantic optimizer optimizer_prog tac interp
 BINS   = build/compiler $(STAGES:%=build/%_test)
 
-GOOD = sample1 sample4_chain sample10_gen sample13_scale
+GOOD = sample1 sample4_chain sample10_gen sample13_scale sample16_cse sample17_algebra
 BAD  = sample2_bad sample3_undefined sample7_bad_input sample8_bad_output sample11_bad_size sample14_bad_number
 
-.PHONY: all test run ui clean
+.PHONY: all test fuzz run ui clean
 
 all: $(BINS)
 
@@ -64,6 +64,14 @@ test: all
 		echo "PASS $$s with -O0 (same answer with the optimizer off)" || \
 		{ echo "FAIL $$s with -O0"; exit 1; }; \
 	done
+	@for s in sample16_cse sample17_algebra sample20_cse_func; do \
+		./build/compiler tests/$$s.matlang build/$$s.c cse_func && \
+		./build/compiler -O0 tests/$$s.matlang build/$$s.O0.c cse_func && \
+		a=$$(grep -E -c 'mat_(mul|add|sub|scale|transpose|inverse)\(' build/$$s.c); \
+		b=$$(grep -E -c 'mat_(mul|add|sub|scale|transpose|inverse)\(' build/$$s.O0.c); \
+		if [ "$$a" -lt "$$b" ]; then echo "PASS $$s: the TAC optimizer cut $$b matrix operations to $$a"; \
+		else echo "FAIL $$s: the TAC optimizer removed nothing ($$b -> $$a)"; exit 1; fi; \
+	done
 	@if cmp -s build/sample4_chain.c build/sample4_chain.O0.c; then \
 		echo "FAIL -O0 made no difference to the sample4_chain code"; exit 1; \
 	else \
@@ -73,7 +81,8 @@ test: all
 	./build/compiler tests/sample6_alias.matlang build/sample6_alias.c alias_copy && \
 	./build/compiler tests/sample12_gen_func.matlang build/sample12_gen_func.c gen_func && \
 	./build/compiler tests/sample15_scale_func.matlang build/sample15_scale_func.c scale_func && \
-	$(CC) $(CFLAGS) -Ibuild tests/func_caller.c build/sample5_func.c build/sample6_alias.c build/sample12_gen_func.c build/sample15_scale_func.c \
+	./build/compiler tests/sample20_cse_func.matlang build/sample20_cse_func.c cse_func && \
+	$(CC) $(CFLAGS) -Ibuild tests/func_caller.c build/sample5_func.c build/sample6_alias.c build/sample12_gen_func.c build/sample15_scale_func.c build/sample20_cse_func.c \
 		-o build/func_caller $(LDLIBS) && \
 	./build/func_caller && \
 	echo "PASS func_caller (generated functions return the right, freshly allocated result)" || \
@@ -83,6 +92,14 @@ test: all
 	else \
 		echo "PASS func_caller (rejected: $$(cat build/func_caller.err.txt))"; \
 	fi
+	@for s in sample18_many_errors sample19_many_sem_errors; do \
+		if ./build/compiler tests/$$s.matlang build/$$s.c 2> build/$$s.err.txt; then \
+			echo "FAIL $$s (should have been rejected)"; exit 1; \
+		fi; \
+		n=$$(grep -c 'error at line' build/$$s.err.txt); \
+		if [ "$$n" -ge 3 ]; then echo "PASS $$s (reported $$n errors in one run)"; \
+		else echo "FAIL $$s (reported $$n errors, wanted 3)"; exit 1; fi; \
+	done
 	@for s in $(BAD); do \
 		if ./build/compiler tests/$$s.matlang build/$$s.c 2> build/$$s.err.txt; then \
 			echo "FAIL $$s (should have been rejected)"; exit 1; \
@@ -90,6 +107,12 @@ test: all
 			echo "PASS $$s (rejected: $$(cat build/$$s.err.txt))"; \
 		fi; \
 	done
+
+# random programs, compared four ways with an answer worked out in Python
+# (interpreter and generated C, optimizer on and off): make fuzz [N=200] [SEED=1]
+N ?= 200
+fuzz: all
+	python3 tests/fuzz.py $(N) $(SEED)
 
 # local web page: make ui, then open http://localhost:8000
 ui: build/compiler build/tac_test build/optimizer_prog_test

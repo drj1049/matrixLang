@@ -205,7 +205,7 @@ static Value run_call(Env *env, const TACInstr *ins) {
 static void print_value(const Value *v) {
     for (int r = 0; r < v->rows; r++) {
         for (int c = 0; c < v->cols; c++) {
-            printf("%8.4g ", v->data[r][c]);
+            printf("%8.4g ", v->data[r][c] + 0.0);   /* + 0.0: never print -0 */
         }
         printf("\n");
     }

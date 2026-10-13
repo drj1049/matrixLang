@@ -1,0 +1,9 @@
+# a function with a repeated product and a double transpose: R = 2 * (A * B) + A
+input A 2x2
+input B 2x2
+P = A * B
+Q = A * B
+T = transpose(A)
+U = transpose(T)
+R = P + Q + U * identity(2)
+output R

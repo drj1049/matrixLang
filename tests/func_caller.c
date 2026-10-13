@@ -1,5 +1,6 @@
 /* Calls the functions generated from sample5_func.matlang,
- * sample6_alias.matlang, sample12_gen_func.matlang and sample15_scale_func.matlang the way a real project would: through the
+ * sample6_alias.matlang, sample12_gen_func.matlang, sample15_scale_func.matlang
+ * and sample20_cse_func.matlang the way a real project would: through the
  * generated headers, many times, with its own arrays.
  * usage: func_caller            check the results
  *        func_caller badsize    pass a wrong-sized matrix (must exit 1)
@@ -10,6 +11,7 @@
 #include "sample6_alias.h"
 #include "sample12_gen_func.h"
 #include "sample15_scale_func.h"
+#include "sample20_cse_func.h"
 
 int main(int argc, char **argv) {
     double a[] = {1, 2, 3, 4, 5, 6};
@@ -73,6 +75,21 @@ int main(int argc, char **argv) {
         }
     }
     mat_free(S);
+
+    /* cse_func computes A*B + A*B + A, with the product and the double
+     * transpose handled by the optimizer: [2 1; 4 3] twice plus A */
+    double b2[] = {0, 1, 1, 0};
+    Mat B2 = {2, 2, b2};
+    Mat K = cse_func(C, B2);
+    double want_k[] = {5, 4, 11, 10};
+    if (K.r != 2 || K.c != 2) { printf("cse_func returned the wrong size\n"); return 1; }
+    for (int i = 0; i < 4; i++) {
+        if (K.d[i] != want_k[i]) {
+            printf("cse_func wrong value at %d: got %g, want %g\n", i, K.d[i], want_k[i]);
+            return 1;
+        }
+    }
+    mat_free(K);
 
     return 0;
 }

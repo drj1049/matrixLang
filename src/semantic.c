@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdarg.h>
 #include <ctype.h>
+#include <setjmp.h>
 #include "semantic.h"
 
 /* ---- Symbol table ----
@@ -15,6 +16,7 @@ typedef struct {
     int rows;
     int cols;
     int is_input;   /* declared with 'input': owned by the caller, read-only */
+    int is_bad;     /* its definition had an error: uses of it are skipped quietly */
 } Symbol;
 
 typedef struct {
@@ -53,6 +55,24 @@ static void symtab_set(SymbolTable *st, const char *name, int rows, int cols) {
     }
     st->items[idx].rows = rows;
     st->items[idx].cols = cols;
+    st->items[idx].is_bad = 0;
+}
+
+/* Remembers that this name's definition failed to check, so later uses of it
+ * do not pile "undefined variable" errors on top of the real one. */
+static void symtab_mark_bad(SymbolTable *st, const char *name) {
+    int idx = symtab_find(st, name);
+    if (idx == -1) {
+        symtab_set(st, name, 0, 0);
+        idx = symtab_find(st, name);
+    }
+    if (st->items[idx].is_input) return;
+    st->items[idx].is_bad = 1;
+}
+
+static int symtab_is_bad(SymbolTable *st, const char *name) {
+    int idx = symtab_find(st, name);
+    return idx != -1 && st->items[idx].is_bad;
 }
 
 static int symtab_is_input(SymbolTable *st, const char *name) {
@@ -69,15 +89,56 @@ static int symtab_get(SymbolTable *st, const char *name, int *rows, int *cols) {
     return 1;
 }
 
-/* ---- Error helper ---- */
-static void sem_error(int line, const char *fmt, ...) {
-    fprintf(stderr, "Semantic error at line %d: ", line);
+/* ---- Error handling ----
+ * An error is written down and the checker jumps back to the statement loop
+ * (setjmp/longjmp), so the next statement is checked too and one run can
+ * report several mistakes. semantic_check prints them all at the end.
+ */
+#define MAX_SEM_ERRORS 20
+
+typedef struct {
+    int line;
+    char msg[256];
+} SemError;
+
+static SemError sem_errors[MAX_SEM_ERRORS];
+static int sem_error_count;
+static int sem_too_many;
+static jmp_buf stmt_jmp;
+
+/* write an error down without leaving the current statement */
+static void sem_note(int line, const char *fmt, ...) {
+    if (sem_error_count >= MAX_SEM_ERRORS) {
+        sem_too_many = 1;
+        return;
+    }
     va_list args;
     va_start(args, fmt);
-    vfprintf(stderr, fmt, args);
+    sem_errors[sem_error_count].line = line;
+    vsnprintf(sem_errors[sem_error_count].msg, sizeof sem_errors[sem_error_count].msg, fmt, args);
     va_end(args);
-    fprintf(stderr, "\n");
-    exit(1);
+    sem_error_count++;
+}
+
+/* write an error down and give up on the current statement */
+static void sem_error(int line, const char *fmt, ...) {
+    if (sem_error_count >= MAX_SEM_ERRORS) {
+        sem_too_many = 1;
+    } else {
+        va_list args;
+        va_start(args, fmt);
+        sem_errors[sem_error_count].line = line;
+        vsnprintf(sem_errors[sem_error_count].msg, sizeof sem_errors[sem_error_count].msg, fmt, args);
+        va_end(args);
+        sem_error_count++;
+    }
+    longjmp(stmt_jmp, 1);
+}
+
+/* give up on the current statement without a new message, because the
+ * variable it uses already had an error reported */
+static void sem_skip_statement(void) {
+    longjmp(stmt_jmp, 1);
 }
 
 /* ---- Core: check an expression node, filling in its result dimensions.
@@ -111,6 +172,7 @@ static void check_expr(SymbolTable *st, ASTNode *node) {
             if (!symtab_get(st, node->name, &r, &c)) {
                 sem_error(node->line, "undefined variable '%s'", node->name);
             }
+            if (symtab_is_bad(st, node->name)) sem_skip_statement();
             node->result_rows = r;
             node->result_cols = c;
             break;
@@ -250,6 +312,7 @@ static void check_statement(SymbolTable *st, ASTNode *stmt) {
         if (!symtab_get(st, stmt->print_target, &r, &c)) {
             sem_error(stmt->line, "cannot print undefined variable '%s'", stmt->print_target);
         }
+        if (symtab_is_bad(st, stmt->print_target)) sem_skip_statement();
     } else if (stmt->type == NODE_INPUT) {
         check_not_temp_name(stmt->name, stmt->line);
         if (symtab_find(st, stmt->name) != -1) {
@@ -261,6 +324,7 @@ static void check_statement(SymbolTable *st, ASTNode *stmt) {
         if (!symtab_get(st, stmt->name, &stmt->result_rows, &stmt->result_cols)) {
             sem_error(stmt->line, "cannot output undefined variable '%s'", stmt->name);
         }
+        if (symtab_is_bad(st, stmt->name)) sem_skip_statement();
     } else {
         sem_error(stmt->line, "internal error: unexpected node at statement level");
     }
@@ -271,25 +335,56 @@ void semantic_check(Program *prog) {
     int first_input_line = 0;
     int has_output = 0;
 
+    sem_error_count = 0;
+    sem_too_many = 0;
+
     for (int i = 0; i < prog->count; i++) {
         ASTNode *stmt = prog->statements[i];
 
-        /* output is the function's return, so it has to come last */
-        if (has_output) {
-            if (stmt->type == NODE_OUTPUT) {
-                sem_error(stmt->line, "only one output is supported");
+        if (setjmp(stmt_jmp) == 0) {
+            /* output is the function's return, so it has to come last */
+            if (has_output) {
+                if (stmt->type == NODE_OUTPUT) {
+                    sem_error(stmt->line, "only one output is supported");
+                }
+                sem_error(stmt->line, "no statements are allowed after output");
             }
-            sem_error(stmt->line, "no statements are allowed after output");
+            check_statement(st, stmt);
+        } else if (stmt->type == NODE_ASSIGN) {
+            /* this assignment failed, so its target has no usable value */
+            symtab_mark_bad(st, stmt->target);
         }
-
-        check_statement(st, stmt);
 
         if (stmt->type == NODE_INPUT && !first_input_line) first_input_line = stmt->line;
         if (stmt->type == NODE_OUTPUT) has_output = 1;
+
+        if (sem_too_many) break;
     }
 
-    if (first_input_line && !has_output) {
-        sem_error(first_input_line, "program declares inputs but has no output statement");
+    if (first_input_line && !has_output && !sem_too_many) {
+        sem_note(first_input_line, "program declares inputs but has no output statement");
+    }
+
+    if (sem_error_count > 0) {
+        /* list them in source order (the "no output" error is found last) */
+        for (int i = 1; i < sem_error_count; i++) {
+            SemError e = sem_errors[i];
+            int j = i - 1;
+            while (j >= 0 && sem_errors[j].line > e.line) {
+                sem_errors[j + 1] = sem_errors[j];
+                j--;
+            }
+            sem_errors[j + 1] = e;
+        }
+        for (int i = 0; i < sem_error_count; i++) {
+            fprintf(stderr, "Semantic error at line %d: %s\n", sem_errors[i].line, sem_errors[i].msg);
+        }
+        if (sem_too_many) {
+            fprintf(stderr, "Too many errors, stopping after %d.\n", MAX_SEM_ERRORS);
+        } else if (sem_error_count > 1) {
+            fprintf(stderr, "%d errors found.\n", sem_error_count);
+        }
+        exit(1);
     }
     symtab_free(st);
 }

@@ -1,0 +1,7 @@
+# three syntax mistakes: all of them are reported in one run
+A = [[1,2],[3,4]]
+B = identity(0)
+C = A * [[1,2]
+print(A)
+D = zeros(2)
+print(D)

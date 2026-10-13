@@ -154,7 +154,7 @@ static inline Mat mat_inverse(Mat a) {
 static inline void mat_print(const char *name, Mat a) {
     printf("%s =\n", name);
     for (int i = 0; i < a.r; i++) {
-        for (int j = 0; j < a.c; j++) printf("%8.4g ", a.d[i * a.c + j]);
+        for (int j = 0; j < a.c; j++) printf("%8.4g ", a.d[i * a.c + j] + 0.0);   /* + 0.0: never print -0 */
         printf("\n");
     }
     printf("\n");

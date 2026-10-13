@@ -16,6 +16,7 @@
 #include "../src/semantic.h"
 #include "../src/optimizer.h"
 #include "../src/tac.h"
+#include "../src/tacopt.h"
 #include "../src/codegen.h"
 
 static char *read_file(const char *path) {
@@ -78,6 +79,7 @@ int main(int argc, char **argv) {
     semantic_check(&prog);
     if (optimize) optimize_program(&prog);
     TACProgram tac = tac_generate(&prog);
+    if (optimize) tac_optimize(&tac, NULL);
 
     FILE *out = fopen(pos[1], "w");
     if (!out) { perror("fopen"); return 1; }

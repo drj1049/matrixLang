@@ -8,6 +8,7 @@
 #include "../src/semantic.h"
 #include "../src/optimizer.h"
 #include "../src/tac.h"
+#include "../src/tacopt.h"
 
 static char *read_file(const char *path) {
     FILE *f = fopen(path, "rb");
@@ -44,8 +45,24 @@ int main(int argc, char **argv) {
 
     TACProgram tac = tac_generate(&prog);
 
+    /* what the TAC optimizer changed goes to a scratch file, printed after the code */
+    FILE *notes = tmpfile();
+    if (optimize) tac_optimize(&tac, notes);
+
     printf("Three-address code:\n\n");
     tac_print(&tac);
+
+    if (notes) {
+        char line[512];
+        int first = 1;
+        rewind(notes);
+        while (fgets(line, sizeof line, notes)) {
+            if (first) printf("\n=== notes ===\n");
+            first = 0;
+            fputs(line, stdout);
+        }
+        fclose(notes);
+    }
 
     tac_free(&tac);
     program_free(&prog);

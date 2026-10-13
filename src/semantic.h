@@ -17,8 +17,11 @@
  * As a side effect, fills in result_rows/result_cols on every expression
  * node in the AST, so later stages (optimizer, codegen) don't need to
  * recompute dimensions themselves.
- * On any violation, prints an error with the offending line number and
- * exits(1), same convention as the lexer and parser use.
+ * Every statement is checked, even after an error in an earlier one. A
+ * statement whose assignment failed marks its variable as bad, so uses of it
+ * further down are skipped without extra messages. At the end all errors
+ * found (up to 20) are printed to stderr, one "Semantic error at line N: ..."
+ * line each, and the program exits(1).
  */
 void semantic_check(Program *prog);
 

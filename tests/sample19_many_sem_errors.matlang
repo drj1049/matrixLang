@@ -1,0 +1,9 @@
+# several meaning mistakes; later uses of a broken line do not add noise
+A = [[1,2],[3,4]]
+B = [[1,2,3]]
+C = A * B
+D = C + A
+E = inverse(B)
+F = X + A
+print(D)
+print(A)
