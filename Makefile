@@ -9,8 +9,8 @@ HDRS = $(wildcard src/*.h)
 STAGES = lexer parser semantic optimizer optimizer_prog tac interp
 BINS   = build/compiler $(STAGES:%=build/%_test)
 
-GOOD = sample1 sample4_chain sample10_gen
-BAD  = sample2_bad sample3_undefined sample7_bad_input sample8_bad_output sample11_bad_size
+GOOD = sample1 sample4_chain sample10_gen sample13_scale
+BAD  = sample2_bad sample3_undefined sample7_bad_input sample8_bad_output sample11_bad_size sample14_bad_number
 
 .PHONY: all test run ui clean
 
@@ -72,7 +72,8 @@ test: all
 	@./build/compiler tests/sample5_func.matlang build/sample5_func.c && \
 	./build/compiler tests/sample6_alias.matlang build/sample6_alias.c alias_copy && \
 	./build/compiler tests/sample12_gen_func.matlang build/sample12_gen_func.c gen_func && \
-	$(CC) $(CFLAGS) -Ibuild tests/func_caller.c build/sample5_func.c build/sample6_alias.c build/sample12_gen_func.c \
+	./build/compiler tests/sample15_scale_func.matlang build/sample15_scale_func.c scale_func && \
+	$(CC) $(CFLAGS) -Ibuild tests/func_caller.c build/sample5_func.c build/sample6_alias.c build/sample12_gen_func.c build/sample15_scale_func.c \
 		-o build/func_caller $(LDLIBS) && \
 	./build/func_caller && \
 	echo "PASS func_caller (generated functions return the right, freshly allocated result)" || \

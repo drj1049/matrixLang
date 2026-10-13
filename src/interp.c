@@ -232,6 +232,16 @@ void interp_run(const TACProgram *tac) {
                 free_value(&v);
                 break;
             }
+            case TAC_SCALE: {
+                Value *a = env_get(&env, ins->arg1);
+                Value out = make_value(a->rows, a->cols);
+                for (int r = 0; r < a->rows; r++)
+                    for (int c = 0; c < a->cols; c++)
+                        out.data[r][c] = a->data[r][c] * ins->scalar + 0.0;   /* + 0.0 turns -0 into 0 */
+                env_set(&env, ins->result, &out);
+                free_value(&out);
+                break;
+            }
             case TAC_BINOP: {
                 Value *a = env_get(&env, ins->arg1);
                 Value *b = env_get(&env, ins->arg2);

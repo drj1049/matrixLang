@@ -32,6 +32,19 @@ ASTNode *ast_new_matrix_gen(TokenType kind, int rows, int cols, int line) {
     return n;
 }
 
+ASTNode *ast_new_number(double value, int line) {
+    ASTNode *n = ast_alloc(NODE_NUMBER, line);
+    n->number = value;
+    return n;
+}
+
+ASTNode *ast_new_scale(double factor, ASTNode *matrix, int line) {
+    ASTNode *n = ast_alloc(NODE_SCALE, line);
+    n->number = factor;
+    n->left = matrix;
+    return n;
+}
+
 ASTNode *ast_new_binop(char op, ASTNode *left, ASTNode *right, int line) {
     ASTNode *n = ast_alloc(NODE_BINOP, line);
     n->op = op;
@@ -82,6 +95,7 @@ void ast_free(ASTNode *node) {
             for (int i = 0; i < node->rows; i++) free(node->values[i]);
             free(node->values);
             break;
+        case NODE_SCALE:
         case NODE_BINOP:
             ast_free(node->left);
             ast_free(node->right);
@@ -136,6 +150,17 @@ void ast_print(const ASTNode *node, int indent) {
                 }
                 printf("\n");
             }
+            break;
+
+        case NODE_NUMBER:
+            printf("Number(%g)\n", node->number);
+            break;
+
+        case NODE_SCALE:
+            printf("Scale(%g)", node->number);
+            if (node->result_rows > 0) printf(" -> %dx%d", node->result_rows, node->result_cols);
+            printf("\n");
+            ast_print(node->left, indent + 1);
             break;
 
         case NODE_MATRIX_GEN:

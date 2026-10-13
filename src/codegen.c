@@ -99,6 +99,11 @@ static void emit_body(const TACProgram *tac, FILE *out) {
                 fprintf(out, "    mat_set(&v_%s, mat_new(%d, %d));\n", ins->result, ins->rows, ins->cols);
             break;
 
+        case TAC_SCALE:
+            fprintf(out, "    mat_set(&v_%s, mat_scale(v_%s, %.17g));\n",
+                    ins->result, ins->arg1, ins->scalar);
+            break;
+
         case TAC_BINOP:
             fprintf(out, "    mat_set(&v_%s, %s(v_%s, v_%s));\n",
                     ins->result, binop_fn(ins->binop), ins->arg1, ins->arg2);

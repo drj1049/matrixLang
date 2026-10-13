@@ -79,6 +79,20 @@ static void gen_expr(ASTNode *node, char *out) {
             break;
         }
 
+        case NODE_SCALE: {
+            char m[TAC_NAME_MAX], t[TAC_NAME_MAX];
+            gen_expr(node->left, m);
+            new_temp(t);
+            TACInstr *ins = tac_emit();
+            ins->op = TAC_SCALE;
+            ins->line = node->line;
+            strncpy(ins->result, t, TAC_NAME_MAX - 1);
+            strncpy(ins->arg1, m, TAC_NAME_MAX - 1);
+            ins->scalar = node->number;
+            strncpy(out, t, TAC_NAME_MAX - 1);
+            break;
+        }
+
         case NODE_BINOP: {
             char l[TAC_NAME_MAX], r[TAC_NAME_MAX], t[TAC_NAME_MAX];
             gen_expr(node->left, l);
@@ -188,6 +202,9 @@ void tac_print(const TACProgram *tac) {
                     printf("%-4s = identity(%d)\n", ins->result, ins->rows);
                 else
                     printf("%-4s = zeros(%d, %d)\n", ins->result, ins->rows, ins->cols);
+                break;
+            case TAC_SCALE:
+                printf("%-4s = %.10g * %s\n", ins->result, ins->scalar, ins->arg1);
                 break;
             case TAC_BINOP:
                 printf("%-4s = %s %c %s\n", ins->result, ins->arg1, ins->binop, ins->arg2);

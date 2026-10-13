@@ -20,8 +20,9 @@ static Token expect(TokenType type, const char *what) {
 
 /* ---- Forward declarations for the recursive-descent functions ---- */
 static ASTNode *parse_expr(void);      /* term (('+'|'-') term)* */
-static ASTNode *parse_term(void);      /* factor ('*' factor)* */
-static ASTNode *parse_factor(void);    /* ID | matrixLiteral */
+static ASTNode *parse_term(void);      /* unary ('*' unary)* */
+static ASTNode *parse_unary(void);     /* '-' unary | NUMBER | factor */
+static ASTNode *parse_factor(void);    /* ID | matrixLiteral | matrixGen */
 static ASTNode *parse_matrix_literal(void);
 static ASTNode *parse_matrix_gen(void);
 static ASTNode *parse_func_call(void);
@@ -142,17 +143,82 @@ static ASTNode *parse_factor(void) {
     if (t.type == TOK_IDENTITY || t.type == TOK_ZEROS) {
         return parse_matrix_gen();
     }
-    parse_error("expected an identifier or matrix literal", t);
+    parse_error("expected an identifier, matrix literal or number", t);
     return NULL; /* unreachable, silences compiler warning */
 }
 
-/* term -> factor ('*' factor)* */
+/* -0 is just 0, so a scaled matrix never prints "-0" because of the number */
+static double clean_zero(double v) {
+    return v == 0 ? 0.0 : v;
+}
+
+/* factor * matrix: scaling a scaled matrix just multiplies the two numbers */
+static ASTNode *make_scale(double factor, ASTNode *matrix, int line) {
+    if (matrix->type == NODE_SCALE) {
+        matrix->number = clean_zero(matrix->number * factor);
+        return matrix;
+    }
+    return ast_new_scale(clean_zero(factor), matrix, line);
+}
+
+/* '-' applied to a number gives a number, applied to a matrix it scales by -1 */
+static ASTNode *negate(ASTNode *operand, int line) {
+    if (operand->type == NODE_NUMBER) {
+        operand->number = clean_zero(-operand->number);
+        return operand;
+    }
+    return make_scale(-1.0, operand, line);
+}
+
+/* one '*' step. Number * number stays a number, number * matrix (either
+ * way round) becomes a scale, matrix * matrix is a real matrix multiply. */
+static ASTNode *make_product(ASTNode *left, ASTNode *right, int line) {
+    if (left->type == NODE_NUMBER && right->type == NODE_NUMBER) {
+        left->number = clean_zero(left->number * right->number);
+        ast_free(right);
+        return left;
+    }
+    if (left->type == NODE_NUMBER) {
+        double k = left->number;
+        ast_free(left);
+        return make_scale(k, right, line);
+    }
+    if (right->type == NODE_NUMBER) {
+        double k = right->number;
+        ast_free(right);
+        return make_scale(k, left, line);
+    }
+    return ast_new_binop('*', left, right, line);
+}
+
+/* unary -> '-' unary | NUMBER | factor */
+static ASTNode *parse_unary(void) {
+    Token t = lex_peek();
+    if (t.type == TOK_MINUS) {
+        lex_advance();
+        return negate(parse_unary(), t.line);
+    }
+    if (t.type == TOK_NUMBER) {
+        lex_advance();
+        return ast_new_number(atof(t.text), t.line);
+    }
+    return parse_factor();
+}
+
+/* term -> unary ('*' unary)*
+ * A number on its own is not a matrix, so a term must not end up as one. */
 static ASTNode *parse_term(void) {
-    ASTNode *left = parse_factor();
+    int line = lex_peek().line;
+    ASTNode *left = parse_unary();
     while (lex_peek().type == TOK_STAR) {
         Token op = lex_advance();
-        ASTNode *right = parse_factor();
-        left = ast_new_binop('*', left, right, op.line);
+        ASTNode *right = parse_unary();
+        left = make_product(left, right, op.line);
+    }
+    if (left->type == NODE_NUMBER) {
+        fprintf(stderr, "Parse error at line %d: a number must be multiplied with a matrix "
+                        "(for example 2 * A)\n", line);
+        exit(1);
     }
     return left;
 }

@@ -1,0 +1,4 @@
+# a function with scalar multiplication and unary minus: R = -A + 2 * A * 3
+input A 2x2
+R = -A + 2 * A * 3
+output R

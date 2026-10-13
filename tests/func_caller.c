@@ -1,5 +1,5 @@
 /* Calls the functions generated from sample5_func.matlang,
- * sample6_alias.matlang and sample12_gen_func.matlang the way a real project would: through the
+ * sample6_alias.matlang, sample12_gen_func.matlang and sample15_scale_func.matlang the way a real project would: through the
  * generated headers, many times, with its own arrays.
  * usage: func_caller            check the results
  *        func_caller badsize    pass a wrong-sized matrix (must exit 1)
@@ -9,6 +9,7 @@
 #include "sample5_func.h"
 #include "sample6_alias.h"
 #include "sample12_gen_func.h"
+#include "sample15_scale_func.h"
 
 int main(int argc, char **argv) {
     double a[] = {1, 2, 3, 4, 5, 6};
@@ -60,6 +61,18 @@ int main(int argc, char **argv) {
         }
     }
     mat_free(G);
+
+    /* scale_func computes -A + 2 * A * 3, which is 5 * A */
+    Mat S = scale_func(C);
+    double want_s[] = {5, 10, 15, 20};
+    if (S.r != 2 || S.c != 2) { printf("scale_func returned the wrong size\n"); return 1; }
+    for (int i = 0; i < 4; i++) {
+        if (S.d[i] != want_s[i]) {
+            printf("scale_func wrong value at %d: got %g, want %g\n", i, S.d[i], want_s[i]);
+            return 1;
+        }
+    }
+    mat_free(S);
 
     return 0;
 }

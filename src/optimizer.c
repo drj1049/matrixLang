@@ -182,6 +182,8 @@ ASTNode *optimize_expr(ASTNode *node) {
     if (node->type == NODE_BINOP) {
         node->left = optimize_expr(node->left);
         node->right = optimize_expr(node->right);
+    } else if (node->type == NODE_SCALE) {
+        node->left = optimize_expr(node->left);
     }
     return node;
 }

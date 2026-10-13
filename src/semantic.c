@@ -93,6 +93,13 @@ static void check_expr(SymbolTable *st, ASTNode *node) {
             node->result_cols = node->cols;
             break;
 
+        case NODE_SCALE:
+            /* scaling keeps the size of the matrix being scaled */
+            check_expr(st, node->left);
+            node->result_rows = node->left->result_rows;
+            node->result_cols = node->left->result_cols;
+            break;
+
         case NODE_MATRIX_GEN:
             /* identity(n) and zeros(r, c) carry their size in the node */
             node->result_rows = node->rows;

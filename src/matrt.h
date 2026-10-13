@@ -34,6 +34,12 @@ static inline Mat mat_identity(int n) {
     return m;
 }
 
+static inline Mat mat_scale(Mat a, double k) {
+    Mat m = mat_new(a.r, a.c);
+    for (int i = 0; i < a.r * a.c; i++) m.d[i] = a.d[i] * k + 0.0;   /* + 0.0 turns -0 into 0 */
+    return m;
+}
+
 static inline Mat mat_copy(Mat a) {
     return mat_from(a.r, a.c, a.d);
 }

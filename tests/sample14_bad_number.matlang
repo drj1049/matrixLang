@@ -1,0 +1,2 @@
+# a number alone is not a matrix: it has to be multiplied with one
+X = 5

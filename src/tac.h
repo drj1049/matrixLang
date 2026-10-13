@@ -12,6 +12,7 @@
  * Forms produced:
  *   t = LOADMATRIX RxC              (materializes a matrix literal)
  *   t = identity(n) / t = zeros(r, c)
+ *   t = k * a                       (every element of a times the number k)
  *   t = a op b                      (op is '+', '-', '*')
  *   t = func(a1, a2, ..., an)       (func is add/subtract/multiply/transpose/inverse)
  *   t = a                           (plain copy, e.g. X = Y or X = t3)
@@ -22,6 +23,7 @@
 typedef enum {
     TAC_LOAD_MATRIX,
     TAC_GEN,
+    TAC_SCALE,
     TAC_BINOP,
     TAC_CALL,
     TAC_COPY,
@@ -44,6 +46,9 @@ typedef struct {
     char arg1[TAC_NAME_MAX];
     char arg2[TAC_NAME_MAX];
     char binop;                  /* '+', '-', '*' */
+
+    /* TAC_SCALE: result = scalar * arg1 */
+    double scalar;
 
     /* TAC_CALL */
     char func_name[16];          /* "add", "subtract", "multiply", "transpose", "inverse"

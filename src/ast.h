@@ -11,12 +11,14 @@
  * (add/subtract/multiply/transpose/inverse), or MATRIX_GEN (identity/zeros).
  */
 typedef enum {
-    NODE_NUMBER,          /* a bare number, e.g. inside a matrix literal */
+    NODE_NUMBER,          /* a bare number in an expression; only the parser sees these:
+                             it folds each one into a NODE_SCALE, or rejects it */
     NODE_MATRIX_LITERAL,  /* [[1,2],[3,4]] */
     NODE_IDENTIFIER,      /* A, B, C ... refers to a previously assigned var */
     NODE_BINOP,           /* A + B, A - B, A * B (infix, always 2 operands) */
     NODE_FUNC_CALL,       /* add(A,B,C), multiply(A,B,C,D), transpose(A), inverse(A) */
     NODE_MATRIX_GEN,      /* identity(3), zeros(2,3): a matrix built from its size alone */
+    NODE_SCALE,           /* 2 * A, A * 2, -A: every element of a matrix times a number */
     NODE_ASSIGN,          /* X = <expr> */
     NODE_PRINT,           /* print(X) */
     NODE_INPUT,           /* input A 2x3: a matrix the caller passes in */
@@ -39,6 +41,10 @@ typedef struct ASTNode {
     double **values;
     int rows;
     int cols;
+
+    /* NODE_NUMBER: the value. NODE_SCALE: the number every element is
+     * multiplied by; the matrix expression it scales is in left. */
+    double number;
 
     /* NODE_BINOP: op is '+', '-', or '*' */
     char op;
@@ -74,6 +80,8 @@ typedef struct ASTNode {
 /* ---- Constructors ---- one per node kind, each mallocs and fills in the node. */
 ASTNode *ast_new_identifier(const char *name, int line);
 ASTNode *ast_new_matrix_literal(double **values, int rows, int cols, int line);
+ASTNode *ast_new_number(double value, int line);
+ASTNode *ast_new_scale(double factor, ASTNode *matrix, int line);
 ASTNode *ast_new_binop(char op, ASTNode *left, ASTNode *right, int line);
 ASTNode *ast_new_func_call(TokenType func_kind, ASTNode **args, int arg_count, int line);
 ASTNode *ast_new_matrix_gen(TokenType kind, int rows, int cols, int line);

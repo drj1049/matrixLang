@@ -1,6 +1,6 @@
 # MatrixLang
 
-A small compiler for a domain-specific language built around matrix operations. Built as a Compiler Design course project. Supports declaring matrices (including negative numbers, `identity(n)` and `zeros(r, c)`), adding, subtracting, multiplying, transposing, inverting, and printing them. Programs compile to plain C, either a standalone program or a function other C code can call, and chains of multiplications are reordered to the cheapest order.
+A small compiler for a domain-specific language built around matrix operations. Built as a Compiler Design course project. Supports declaring matrices (including negative numbers, `identity(n)` and `zeros(r, c)`), multiplying by a number, negating, adding, subtracting, multiplying, transposing, inverting, and printing them. Programs compile to plain C, either a standalone program or a function other C code can call, and chains of multiplications are reordered to the cheapest order.
 
 ## Example program
 
@@ -20,12 +20,14 @@ A = [[1,-2.5],[-3,4]]        # a matrix literal; numbers may be negative
 I = identity(2)              # 2x2 identity matrix
 Z = zeros(2,3)               # 2x3 matrix of zeros
 B = A * I + A                # infix + - *
+S = 2 * A                    # multiply every element by a number (A * 2 works too)
+N = -A                       # same as -1 * A
 C = multiply(A, I, A)        # or add / subtract / multiply with 2 or more matrices
 D = transpose(A)             # transpose / inverse take one matrix
 print(B)
 ```
 
-`identity` and `zeros` take whole numbers from 1 to 10000 (and at most 10 million elements in total). They are keywords, so they cannot be used as variable names. A negative number is written directly inside a matrix literal, as in `[[1,-2.5]]`. There is no unary minus on matrices, so use `subtract(A, B)` or `A - B`.
+`identity` and `zeros` take whole numbers from 1 to 10000 (and at most 10 million elements in total). They are keywords, so they cannot be used as variable names. A negative number is written directly inside a matrix literal, as in `[[1,-2.5]]`. A number has to be multiplied with a matrix: `2 * A` and `A * 0.5` are fine, but `X = 5`, `A + 5` and `2 * 3` are errors. `-A` and `A - -B` work. Numbers and `-` apply to a single matrix, ID, literal or `identity`/`zeros`, not to a function call such as `add(...)` (there are no parentheses in expressions), so put the call in its own line first. Scaling by numbers next to each other is folded at compile time, so `2 * A * 3` becomes `6 * A`.
 
 ## Project structure
 
@@ -170,6 +172,6 @@ Rules:
 
 ## Status
 
-Working: lexer, parser, AST, semantic analysis with symbol table, negative numbers in matrix literals, `identity` and `zeros`, an `-O0` switch for the optimizer, matrix chain multiplication optimizer, three-address code generation, an interpreter that performs real matrix arithmetic including inversion via Gauss-Jordan elimination, and C code generation (standalone program or callable function) with a loop-tiled multiply.
+Working: lexer, parser, AST, semantic analysis with symbol table, negative numbers in matrix literals, `identity` and `zeros`, scalar multiplication and unary minus, an `-O0` switch for the optimizer, matrix chain multiplication optimizer, three-address code generation, an interpreter that performs real matrix arithmetic including inversion via Gauss-Jordan elimination, and C code generation (standalone program or callable function) with a loop-tiled multiply.
 
 `make test` checks that compiled output matches the interpreter (with the optimizer on and off), that the generated functions return correct, freshly allocated results, and that the broken samples are rejected.
