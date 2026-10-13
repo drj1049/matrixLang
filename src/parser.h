@@ -1,3 +1,13 @@
+/*
+ * parser.h : the interface of the parser (the second stage of the compiler).
+ *
+ * The parser takes the token stream from the lexer and checks that it follows
+ * the grammar of MatrixLang. While checking, it builds the AST (see ast.h).
+ * The technique used is RECURSIVE DESCENT: there is one C function for each
+ * grammar rule, and the functions call each other the same way the rules
+ * refer to each other. Because one token of lookahead is always enough to
+ * choose the right rule, the grammar is LL(1).
+ */
 #ifndef PARSER_H
 #define PARSER_H
 
@@ -7,8 +17,8 @@
  * or OUTPUT nodes), in the order they appeared in the source.
  */
 typedef struct {
-    ASTNode **statements;
-    int count;
+    ASTNode **statements;  /* array of statement nodes */
+    int count;             /* how many statements the array holds */
 } Program;
 
 /* Tokenizes and parses the given source string into a Program.

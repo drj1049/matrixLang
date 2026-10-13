@@ -1,3 +1,16 @@
+/*
+ * codegen.h : the C code generator (the last stage of the compiler).
+ *
+ * Takes the optimized TAC and writes a C source file that does the same
+ * work. The generated code uses the small runtime library in matrt.h
+ * (matrix type plus add, multiply, inverse, ...), so each TAC instruction
+ * becomes about one line of C.
+ *
+ * Two kinds of output:
+ *   - a normal program with main(), when the source has no input/output
+ *   - a callable C function, when the source declares `input` / `output`
+ *     (plus a .h header describing it, see codegen_header)
+ */
 #ifndef CODEGEN_H
 #define CODEGEN_H
 

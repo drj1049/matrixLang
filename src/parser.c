@@ -1,3 +1,34 @@
+/*
+ * parser.c : the recursive-descent parser.
+ *
+ * THE GRAMMAR (one C function for each rule)
+ *
+ *   program   -> statement* EOF
+ *   statement -> ID '=' (funcCall | expr)
+ *              | 'print' '(' ID ')'
+ *              | 'input' ID DIMS
+ *              | 'output' ID
+ *   expr      -> term (('+' | '-') term)*
+ *   term      -> unary ('*' unary)*
+ *   unary     -> '-' unary | NUMBER | factor
+ *   factor    -> ID | matrixLiteral | matrixGen | '(' expr ')'
+ *
+ * WHY expr, term AND unary ARE SEPARATE RULES
+ * The rule that is called deeper binds tighter. '*' lives in `term`, which
+ * sits below `expr` where '+' and '-' live, so 1 + 2 * 3 reads as
+ * 1 + (2 * 3). In the loops of expr and term, the tree grows to the left,
+ * so A - B - C means (A - B) - C, as in normal maths.
+ *
+ * ERROR HANDLING (panic mode recovery)
+ * When something is wrong, the parser must not just quit, because we want to
+ * report several mistakes in one run. So:
+ *   1. the error is written into an array (see vfail),
+ *   2. longjmp jumps back to the loop in parse_program (the setjmp there),
+ *   3. skip_to_next_statement throws tokens away until a new statement can
+ *      start (this is called "panic mode"),
+ *   4. parsing continues from that point.
+ * At the end all collected errors are printed in order, and the compiler exits.
+ */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -19,17 +50,19 @@
  */
 #define MAX_ERRORS 20
 
+/* One saved error: where it points and the message text. */
 typedef struct {
     int line;
     int col;
-    int len;
+    int len;       /* how many characters the ^~~~ underline should cover */
     char msg[256];
 } ParseError;
 
+/* All state below is file-private and reset at the start of parse_program. */
 static ParseError errors[MAX_ERRORS];
 static int error_count;
-static int too_many_errors;
-static jmp_buf stmt_jmp;
+static int too_many_errors;   /* set when a 21st error shows up (it is not stored) */
+static jmp_buf stmt_jmp;      /* the place longjmp returns to: the statement loop */
 static int stmt_start_line;   /* line where the statement being parsed began */
 static Token last_tok;        /* the token consumed most recently (line 0 if none yet) */
 static int nest_depth;        /* how deep the unary minus / parenthesis nesting is right now */
@@ -45,7 +78,8 @@ static Token advance(void) {
 }
 
 /* write an error down (where it points and what it says), then jump back to
- * the statement loop */
+ * the statement loop. This function never returns normally: longjmp leaves it.
+ * All the other error helpers below end up here. */
 static void vfail(int line, int col, int len, const char *fmt, va_list args) {
     if (error_count < MAX_ERRORS) {
         errors[error_count].line = line;
@@ -54,6 +88,7 @@ static void vfail(int line, int col, int len, const char *fmt, va_list args) {
         vsnprintf(errors[error_count].msg, sizeof errors[error_count].msg, fmt, args);
         error_count++;
     } else {
+        /* no room left: just remember that errors were dropped */
         too_many_errors = 1;
     }
     longjmp(stmt_jmp, 1);
@@ -94,6 +129,7 @@ static void parse_error(const char *msg, Token got) {
         snprintf(text, sizeof text, "%s (got '%s')", msg, got.text);
 
     if (after_prev) {
+        /* build a fake one-character token just after the previous token */
         Token at = last_tok;
         at.col = last_tok.col + last_tok.len;
         at.len = 1;
@@ -109,14 +145,17 @@ static void parse_error_at(const char *msg, Token got) {
 }
 
 /* Consumes the current token if it matches `type`, else reports an error.
- * A wrong token is left in place, so recovery can look at it. */
+ * A wrong token is left in place, so recovery can look at it.
+ * `what` is the message, for example "expected ')' to close ...". */
 static Token expect(TokenType type, const char *what) {
     Token t = lex_peek();
     if (t.type != type) parse_error(what, t);
     return advance();
 }
 
-/* ---- Forward declarations for the recursive-descent functions ---- */
+/* ---- Forward declarations for the recursive-descent functions ----
+ * The rules call each other in a circle (factor -> expr -> term -> unary ->
+ * factor), so every function must be declared before any of them is defined. */
 static ASTNode *parse_expr(void);      /* term (('+'|'-') term)* */
 static ASTNode *parse_term(void);      /* unary ('*' unary)* */
 static ASTNode *parse_unary(void);     /* '-' unary | NUMBER | factor */
@@ -126,6 +165,8 @@ static ASTNode *parse_matrix_gen(void);
 static ASTNode *parse_func_call(void);
 static ASTNode *parse_statement(void);
 
+/* Is this token the name of a function like add or inverse? Used to choose
+ * between the funcCall rule and the expr rule on the right of '='. */
 static int is_func_keyword(TokenType t) {
     return t == TOK_ADD || t == TOK_SUBTRACT || t == TOK_MULTIPLY ||
            t == TOK_TRANSPOSE || t == TOK_INVERSE;
@@ -140,7 +181,7 @@ static ASTNode *parse_matrix_literal(void) {
     Token first = lex_peek();
     expect(TOK_LBRACKET, "expected '[' to start matrix literal");
 
-    double **rows = NULL;
+    double **rows = NULL;       /* array of rows, grown with realloc as rows arrive */
     int row_count = 0;
     int col_count = -1; /* unset until first row */
 
@@ -163,10 +204,13 @@ static ASTNode *parse_matrix_literal(void) {
             row_values = realloc(row_values, sizeof(double) * this_row_cols);
             /* "-0" stays 0, so it never prints as -0 */
             row_values[this_row_cols - 1] = (negative && value != 0) ? -value : value;
+            /* keep going while a comma follows; "(advance(), 1)" eats the comma
+             * and then gives true */
         } while (lex_peek().type == TOK_COMMA && (advance(), 1));
 
         expect(TOK_RBRACKET, "expected ']' to close matrix row");
 
+        /* the first row fixes the width, every later row must match it */
         if (col_count == -1) {
             col_count = this_row_cols;
         } else if (this_row_cols != col_count) {
@@ -182,15 +226,18 @@ static ASTNode *parse_matrix_literal(void) {
 
     expect(TOK_RBRACKET, "expected ']' to close matrix literal");
 
+    /* underline the whole literal if it sits on one line, else just the first '[' */
     int len = (last_tok.line == first.line) ? last_tok.col + last_tok.len - first.col : first.len;
     return ast_at(ast_new_matrix_literal(rows, row_count, col_count, first.line), first.col, len);
 }
 
 /* One size inside identity(...) / zeros(...): a whole number from 1 up to
  * MAX_GEN_DIM. */
-#define MAX_GEN_DIM 10000
-#define MAX_GEN_CELLS 10000000L
+#define MAX_GEN_DIM 10000          /* biggest allowed rows or columns */
+#define MAX_GEN_CELLS 10000000L    /* biggest allowed rows * columns, so a tiny program cannot ask for gigabytes */
 
+/* Reads one NUMBER token and checks that it is a whole number in range.
+ * `what` is the error message used if there is no number at all. */
 static int parse_size(const char *what) {
     Token t = expect(TOK_NUMBER, what);
     if (strchr(t.text, '.')) {
@@ -205,12 +252,12 @@ static int parse_size(const char *what) {
 
 /* matrixGen -> IDENTITY '(' NUMBER ')' | ZEROS '(' NUMBER ',' NUMBER ')' */
 static ASTNode *parse_matrix_gen(void) {
-    Token kw = advance();
+    Token kw = advance();    /* the identity or zeros keyword */
     expect(TOK_LPAREN, "expected '(' after function name");
 
     int rows, cols;
     if (kw.type == TOK_IDENTITY) {
-        rows = cols = parse_size("expected the size n in identity(n)");
+        rows = cols = parse_size("expected the size n in identity(n)");   /* square: one size */
     } else {
         rows = parse_size("expected the number of rows in zeros(rows, cols)");
         expect(TOK_COMMA, "expected ',' between the rows and columns in zeros(rows, cols)");
@@ -218,6 +265,7 @@ static ASTNode *parse_matrix_gen(void) {
     }
     expect(TOK_RPAREN, "expected ')' to close function call");
 
+    /* cast to long first so rows * cols cannot overflow an int */
     if ((long)rows * cols > MAX_GEN_CELLS) {
         fail_span(kw, "a %dx%d matrix is too large (limit is %ld elements)", rows, cols, MAX_GEN_CELLS);
     }
@@ -241,6 +289,7 @@ static ASTNode *parse_factor(void) {
     }
     if (t.type == TOK_LPAREN) {
         advance();
+        /* every '(' goes one level deeper in the C call stack, so cap it */
         if (++nest_depth > MAX_NEST) {
             fail_tok(t, "expression is nested too deeply (limit is %d levels)", MAX_NEST);
         }
@@ -261,6 +310,7 @@ static double clean_zero(double v) {
 /* factor * matrix: scaling a scaled matrix just multiplies the two numbers */
 static ASTNode *make_scale(double factor, ASTNode *matrix, Token at) {
     if (matrix->type == NODE_SCALE) {
+        /* 2 * (3 * A) becomes one node: Scale(6) over A */
         matrix->number = clean_zero(matrix->number * factor);
         return matrix;
     }
@@ -305,7 +355,7 @@ static ASTNode *parse_unary(void) {
         if (++nest_depth > MAX_NEST) {
             fail_tok(t, "expression is nested too deeply (limit is %d levels)", MAX_NEST);
         }
-        ASTNode *operand = parse_unary();
+        ASTNode *operand = parse_unary();   /* "- - A" is allowed, so recurse */
         nest_depth--;
         return negate(operand, t);
     }
@@ -325,7 +375,7 @@ static ASTNode *parse_term(void) {
         Token op = advance();
         if (++stmt_ops > MAX_OPS) fail_tok(op, "expression is too long (limit is %d operators in one statement)", MAX_OPS);
         ASTNode *right = parse_unary();
-        left = make_product(left, right, op);
+        left = make_product(left, right, op);   /* folds into the left: A*B*C = (A*B)*C */
     }
     if (left->type == NODE_NUMBER) {
         fail_span(first, "a number must be multiplied with a matrix (for example 2 * A)");
@@ -341,6 +391,7 @@ static ASTNode *parse_expr(void) {
         if (++stmt_ops > MAX_OPS) fail_tok(op, "expression is too long (limit is %d operators in one statement)", MAX_OPS);
         ASTNode *right = parse_term();
         char op_char = (op.type == TOK_PLUS) ? '+' : '-';
+        /* the new node takes the old tree as its left child, so the tree leans left */
         left = ast_at(ast_new_binop(op_char, left, right, op.line), op.col, op.len);
     }
     return left;
@@ -368,6 +419,7 @@ static ASTNode *parse_func_call(void) {
 
     expect(TOK_RPAREN, "expected ')' to close function call");
 
+    /* argument count rules, checked after the ')' so the whole call is underlined */
     if ((kw.type == TOK_TRANSPOSE || kw.type == TOK_INVERSE) && arg_count != 1) {
         fail_span(kw, "%s takes exactly 1 argument, got %d", kw.text, arg_count);
     }
@@ -382,6 +434,8 @@ static ASTNode *parse_func_call(void) {
  *            | PRINT '(' ID ')'
  *            | INPUT ID DIMS
  *            | OUTPUT ID
+ * The first token tells which of the four it is (that is the one token of
+ * lookahead the LL(1) grammar needs).
  */
 static ASTNode *parse_statement(void) {
     Token t = lex_peek();
@@ -402,7 +456,8 @@ static ASTNode *parse_statement(void) {
         /* the lexer guarantees the shape digits 'x' digits */
         char *end;
         long rows = strtol(dims.text, &end, 10);
-        long cols = strtol(end + 1, NULL, 10);
+        long cols = strtol(end + 1, NULL, 10);   /* end points at the 'x', so +1 skips it */
+        /* the last test (cols > INT_MAX / rows) means rows * cols would overflow an int */
         if (rows < 1 || cols < 1 || rows > INT_MAX || cols > INT_MAX / rows) {
             fail_tok(dims, "invalid size '%s' for input '%s' "
                            "(rows and columns must be at least 1, and not too large)",
@@ -421,6 +476,7 @@ static ASTNode *parse_statement(void) {
         Token target = advance();
         expect(TOK_EQUALS, "expected '=' after identifier");
 
+        /* a function keyword means funcCall, anything else is an infix expression */
         ASTNode *value = is_func_keyword(lex_peek().type)
                               ? parse_func_call()
                               : parse_expr();
@@ -428,6 +484,8 @@ static ASTNode *parse_statement(void) {
         return ast_at(ast_new_assign(target.text, value, target.line), target.col, target.len);
     }
 
+    /* a leftover '=' usually means the line above ended with an operator, so
+     * the two lines got glued together */
     if (t.type == TOK_EQUALS) {
         fail_tok(t, "unexpected '=' (does the line above end with an operator?)");
     }
@@ -448,6 +506,8 @@ static void skip_to_next_statement(void) {
     }
 }
 
+/* Prints every saved error, then a summary line, then stops the compiler
+ * with exit code 1 (so scripts and the web server know it failed). */
 static void report_errors_and_exit(void) {
     for (int i = 0; i < error_count; i++) {
         diag_print(stderr, "Parse", errors[i].line, errors[i].col, errors[i].len, errors[i].msg);
@@ -460,7 +520,9 @@ static void report_errors_and_exit(void) {
     exit(1);
 }
 
-/* program -> statement* (until EOF) */
+/* program -> statement* (until EOF)
+ * The main loop. setjmp marks the spot that vfail() jumps back to. It returns
+ * 0 the first time (normal flow) and 1 after a longjmp (an error happened). */
 Program parse_program(const char *src) {
     lex_init(src);
     diag_set_source(src);
@@ -471,7 +533,7 @@ Program parse_program(const char *src) {
     Program prog = { NULL, 0 };
     while (lex_peek().type != TOK_EOF) {
         stmt_start_line = lex_peek().line;
-        nest_depth = 0;
+        nest_depth = 0;     /* each statement starts with fresh limits */
         stmt_ops = 0;
         if (setjmp(stmt_jmp) == 0) {
             ASTNode *stmt = parse_statement();
@@ -479,6 +541,7 @@ Program parse_program(const char *src) {
             prog.statements = realloc(prog.statements, sizeof(ASTNode *) * prog.count);
             prog.statements[prog.count - 1] = stmt;
         } else {
+            /* we got here by longjmp: the statement had an error */
             if (too_many_errors) break;
             skip_to_next_statement();
         }
@@ -487,6 +550,7 @@ Program parse_program(const char *src) {
     return prog;
 }
 
+/* Frees every statement tree and the array that held them. */
 void program_free(Program *prog) {
     for (int i = 0; i < prog->count; i++) {
         ast_free(prog->statements[i]);

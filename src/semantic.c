@@ -1,3 +1,24 @@
+/*
+ * semantic.c : checks the meaning of the program (types and sizes).
+ *
+ * In MatrixLang the only "type" is a matrix, and what matters about it is its
+ * SIZE (rows x cols). So semantic analysis is a size checker. It has two
+ * main parts:
+ *
+ *   1. A SYMBOL TABLE: a list of every variable seen so far, with its size.
+ *   2. check_expr(): walks an expression tree from the bottom up and works
+ *      out the size of every node, reporting an error when sizes do not fit
+ *      (for example adding a 2x3 to a 3x3).
+ *
+ * The sizes it finds are stored back into the AST (result_rows/result_cols),
+ * so the optimizer and code generator can just read them.
+ *
+ * ERROR RECOVERY works like in the parser: an error is saved, the checker
+ * jumps (longjmp) to the next statement and keeps going. If an assignment
+ * fails, its variable is marked "bad", and later statements that use it are
+ * skipped silently. This way one real mistake does not create a flood of
+ * follow-up errors.
+ */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,20 +42,23 @@ typedef struct {
 } Symbol;
 
 typedef struct {
-    Symbol *items;
+    Symbol *items;   /* array of symbols, grown with realloc */
     int count;
 } SymbolTable;
 
+/* Makes an empty table (calloc zeroes it: no items, count 0). */
 static SymbolTable *symtab_new(void) {
     SymbolTable *st = calloc(1, sizeof(SymbolTable));
     return st;
 }
 
+/* Frees the table and its array. */
 static void symtab_free(SymbolTable *st) {
     free(st->items);
     free(st);
 }
 
+/* Returns the index of `name` in the table, or -1 if it is not there. */
 static int symtab_find(SymbolTable *st, const char *name) {
     for (int i = 0; i < st->count; i++) {
         if (strcmp(st->items[i].name, name) == 0) return i;
@@ -48,6 +72,7 @@ static int symtab_find(SymbolTable *st, const char *name) {
 static void symtab_set(SymbolTable *st, const char *name, int rows, int cols) {
     int idx = symtab_find(st, name);
     if (idx == -1) {
+        /* new variable: add a zeroed slot at the end */
         st->count++;
         st->items = realloc(st->items, sizeof(Symbol) * st->count);
         idx = st->count - 1;
@@ -56,7 +81,7 @@ static void symtab_set(SymbolTable *st, const char *name, int rows, int cols) {
     }
     st->items[idx].rows = rows;
     st->items[idx].cols = cols;
-    st->items[idx].is_bad = 0;
+    st->items[idx].is_bad = 0;   /* a good assignment clears an earlier "bad" mark */
 }
 
 /* Remembers that this name's definition failed to check, so later uses of it
@@ -67,15 +92,17 @@ static void symtab_mark_bad(SymbolTable *st, const char *name) {
         symtab_set(st, name, 0, 0);
         idx = symtab_find(st, name);
     }
-    if (st->items[idx].is_input) return;
+    if (st->items[idx].is_input) return;   /* an input always keeps its declared size */
     st->items[idx].is_bad = 1;
 }
 
+/* Is this variable marked bad (its definition had an error)? */
 static int symtab_is_bad(SymbolTable *st, const char *name) {
     int idx = symtab_find(st, name);
     return idx != -1 && st->items[idx].is_bad;
 }
 
+/* Was this variable declared with 'input'? (Inputs cannot be assigned to.) */
 static int symtab_is_input(SymbolTable *st, const char *name) {
     int idx = symtab_find(st, name);
     return idx != -1 && st->items[idx].is_input;
@@ -97,6 +124,7 @@ static int symtab_get(SymbolTable *st, const char *name, int *rows, int *cols) {
  */
 #define MAX_SEM_ERRORS 20
 
+/* One saved error: where it points (taken from an AST node) and the text. */
 typedef struct {
     int line;
     int col;
@@ -106,8 +134,8 @@ typedef struct {
 
 static SemError sem_errors[MAX_SEM_ERRORS];
 static int sem_error_count;
-static int sem_too_many;
-static jmp_buf stmt_jmp;
+static int sem_too_many;     /* set when a 21st error shows up (it is not stored) */
+static jmp_buf stmt_jmp;     /* where longjmp returns to: the statement loop */
 
 /* write an error down without leaving the current statement */
 static void sem_note(const ASTNode *at, const char *fmt, ...) {
@@ -125,7 +153,8 @@ static void sem_note(const ASTNode *at, const char *fmt, ...) {
     sem_error_count++;
 }
 
-/* write an error down and give up on the current statement */
+/* write an error down and give up on the current statement
+ * (does not return: longjmp leaves it) */
 static void sem_error(const ASTNode *at, const char *fmt, ...) {
     if (sem_error_count >= MAX_SEM_ERRORS) {
         sem_too_many = 1;
@@ -175,6 +204,7 @@ static void check_expr(SymbolTable *st, ASTNode *node) {
             break;
 
         case NODE_IDENTIFIER: {
+            /* the size of a variable is whatever the symbol table says */
             int r, c;
             if (!symtab_get(st, node->name, &r, &c)) {
                 sem_error(node, "undefined variable '%s'", node->name);
@@ -186,12 +216,14 @@ static void check_expr(SymbolTable *st, ASTNode *node) {
         }
 
         case NODE_BINOP: {
+            /* check both sides first, so their sizes are filled in */
             check_expr(st, node->left);
             check_expr(st, node->right);
             int lr = node->left->result_rows,  lc = node->left->result_cols;
             int rr = node->right->result_rows, rc = node->right->result_cols;
 
             if (node->op == '+' || node->op == '-') {
+                /* add/subtract: both sides must have exactly the same size */
                 if (lr != rr || lc != rc) {
                     sem_error(node,
                         "dimension mismatch for infix '%c': %dx%d vs %dx%d",
@@ -200,6 +232,7 @@ static void check_expr(SymbolTable *st, ASTNode *node) {
                 node->result_rows = lr;
                 node->result_cols = lc;
             } else { /* '*' */
+                /* multiply: (m x n) * (n x p) gives (m x p); the two n's must match */
                 if (lc != rr) {
                     sem_error(node,
                         "cannot multiply %dx%d by %dx%d (inner dimensions must match)",
@@ -264,6 +297,7 @@ static void check_expr(SymbolTable *st, ASTNode *node) {
                 }
 
                 case TOK_TRANSPOSE: {
+                    /* swapping rows and columns is always possible */
                     ASTNode *a = node->args[0];
                     node->result_rows = a->result_cols;
                     node->result_cols = a->result_rows;
@@ -271,6 +305,7 @@ static void check_expr(SymbolTable *st, ASTNode *node) {
                 }
 
                 case TOK_INVERSE: {
+                    /* only a square matrix can have an inverse */
                     ASTNode *a = node->args[0];
                     if (a->result_rows != a->result_cols) {
                         sem_error(a,
@@ -297,9 +332,9 @@ static void check_expr(SymbolTable *st, ASTNode *node) {
  * with one of those names would silently share storage with a temporary.
  */
 static void check_not_temp_name(const char *name, const ASTNode *at) {
-    if (name[0] != 't' || name[1] == '\0') return;
+    if (name[0] != 't' || name[1] == '\0') return;   /* must start with 't' and have more after it */
     for (const char *p = name + 1; *p; p++) {
-        if (!isdigit((unsigned char)*p)) return;
+        if (!isdigit((unsigned char)*p)) return;     /* a non-digit means it is a normal name like "total" */
     }
     sem_error(at, "'%s' is reserved for compiler temporaries, pick another name", name);
 }
@@ -312,6 +347,7 @@ static void check_statement(SymbolTable *st, ASTNode *stmt) {
             sem_error(stmt, "cannot assign to input '%s' (inputs belong to the caller)",
                       stmt->target);
         }
+        /* check the right side first: "A = A + B" must see the OLD size of A */
         check_expr(st, stmt->value);
         symtab_set(st, stmt->target, stmt->value->result_rows, stmt->value->result_cols);
     } else if (stmt->type == NODE_PRINT) {
@@ -328,6 +364,7 @@ static void check_statement(SymbolTable *st, ASTNode *stmt) {
         symtab_set(st, stmt->name, stmt->rows, stmt->cols);
         st->items[symtab_find(st, stmt->name)].is_input = 1;
     } else if (stmt->type == NODE_OUTPUT) {
+        /* also copies the size of the output matrix into the statement node */
         if (!symtab_get(st, stmt->name, &stmt->result_rows, &stmt->result_cols)) {
             sem_error(stmt, "cannot output undefined variable '%s'", stmt->name);
         }
@@ -337,9 +374,11 @@ static void check_statement(SymbolTable *st, ASTNode *stmt) {
     }
 }
 
+/* The entry point (see semantic.h). Checks all statements in order, then
+ * prints every saved error (if any) and exits with code 1. */
 void semantic_check(Program *prog) {
     SymbolTable *st = symtab_new();
-    const ASTNode *first_input = NULL;
+    const ASTNode *first_input = NULL;   /* remembered for the "inputs but no output" error */
     int has_output = 0;
 
     sem_error_count = 0;
@@ -348,6 +387,7 @@ void semantic_check(Program *prog) {
     for (int i = 0; i < prog->count; i++) {
         ASTNode *stmt = prog->statements[i];
 
+        /* setjmp returns 0 now, and 1 if sem_error/sem_skip_statement jumps here */
         if (setjmp(stmt_jmp) == 0) {
             /* output is the function's return, so it has to come last */
             if (has_output) {
@@ -368,12 +408,15 @@ void semantic_check(Program *prog) {
         if (sem_too_many) break;
     }
 
+    /* a program with inputs is a function, and a function must return something */
     if (first_input && !has_output && !sem_too_many) {
         sem_note(first_input, "program declares inputs but has no output statement");
     }
 
     if (sem_error_count > 0) {
-        /* list them in source order (the "no output" error is found last) */
+        /* list them in source order (the "no output" error is found last).
+         * Insertion sort by line number; it is stable, so errors on the same
+         * line keep the order they were found in. */
         for (int i = 1; i < sem_error_count; i++) {
             SemError e = sem_errors[i];
             int j = i - 1;

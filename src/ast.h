@@ -1,3 +1,31 @@
+/*
+ * ast.h : the AST (Abstract Syntax Tree), the data structure the parser builds.
+ *
+ * WHAT IS AN AST?
+ * After the lexer cuts the program into tokens, the parser checks that they
+ * follow the grammar and builds a TREE that shows the structure of the
+ * program. Every later stage (semantic check, optimizer, TAC generator) works
+ * on this tree instead of on text. For example
+ *
+ *     C = (A + B) * 2
+ *
+ * becomes
+ *
+ *     Assign(C)
+ *       Scale(2)
+ *         BinOp(+)
+ *           Identifier(A)
+ *           Identifier(B)
+ *
+ * The brackets are gone, because the shape of the tree already says that
+ * A + B is added first.
+ *
+ * ONE STRUCT FOR ALL NODES
+ * To keep the code simple, every kind of node uses the same struct, ASTNode.
+ * The field `type` says which kind it is, and each kind only uses the fields
+ * that belong to it (the comments inside the struct say which). The unused
+ * fields stay zero, because the constructors create nodes with calloc.
+ */
 #ifndef AST_H
 #define AST_H
 
@@ -8,7 +36,8 @@
  * an INPUT ("input A 2x3") or an OUTPUT ("output C").
  * The right-hand side of an ASSIGN is always an expression node:
  * IDENTIFIER, MATRIX_LITERAL, BINOP (infix add/sub/mul), or FUNC_CALL
- * (add/subtract/multiply/transpose/inverse), or MATRIX_GEN (identity/zeros).
+ * (add/subtract/multiply/transpose/inverse), or MATRIX_GEN (identity/zeros),
+ * or SCALE (a number times a matrix).
  */
 typedef enum {
     NODE_NUMBER,          /* a bare number in an expression; only the parser sees these:
@@ -25,11 +54,12 @@ typedef enum {
     NODE_OUTPUT           /* output C: the matrix the generated function returns */
 } NodeType;
 
+/* Longest variable name we keep, including the ending '\0'. */
 #define AST_NAME_MAX 64
 
 typedef struct ASTNode {
     NodeType type;
-    int line;
+    int line;   /* source line this node came from, for error messages */
     int col;    /* where this node starts on its line (counting from 1), 0 if unknown */
     int len;    /* how many characters to underline when reporting an error on it */
 
@@ -48,7 +78,8 @@ typedef struct ASTNode {
      * multiplied by; the matrix expression it scales is in left. */
     double number;
 
-    /* NODE_BINOP: op is '+', '-', or '*' */
+    /* NODE_BINOP: op is '+', '-', or '*'. left and right are the two
+     * operands. NODE_SCALE also uses left, for the matrix being scaled. */
     char op;
     struct ASTNode *left;
     struct ASTNode *right;
@@ -71,15 +102,19 @@ typedef struct ASTNode {
     int result_rows;
     int result_cols;
 
-    /* NODE_ASSIGN */
+    /* NODE_ASSIGN: the variable being assigned and the expression tree on
+     * the right-hand side */
     char target[AST_NAME_MAX];
     struct ASTNode *value;
 
-    /* NODE_PRINT */
+    /* NODE_PRINT: the variable to print */
     char print_target[AST_NAME_MAX];
 } ASTNode;
 
-/* ---- Constructors ---- one per node kind, each mallocs and fills in the node. */
+/* ---- Constructors ---- one per node kind, each mallocs and fills in the node.
+ * `line` is the source line the node came from. The node takes OWNERSHIP of
+ * the pointers it is given (children, argument lists, matrix numbers), so
+ * ast_free() later frees all of them together. */
 ASTNode *ast_new_identifier(const char *name, int line);
 ASTNode *ast_new_matrix_literal(double **values, int rows, int cols, int line);
 ASTNode *ast_new_number(double value, int line);

@@ -1,3 +1,11 @@
+/*
+ * semantic.h : semantic analysis (the third stage of the compiler).
+ *
+ * The parser only checks the SHAPE of the program (the grammar). It would
+ * happily accept "C = A + B" even if A is 2x3 and B is 5x5, or if A was never
+ * created. Those mistakes are about MEANING, not shape, and they are found
+ * here, by walking the AST and keeping track of the size of every matrix.
+ */
 #ifndef SEMANTIC_H
 #define SEMANTIC_H
 

@@ -1,3 +1,11 @@
+/*
+ * interp.h : the interpreter, which runs TAC directly inside the compiler.
+ *
+ * Besides compiling to C, MatrixLang can simply RUN a program: the
+ * interpreter goes through the TAC list one instruction at a time and does
+ * the real matrix arithmetic. This is what produces the numbers shown in the
+ * "Output" tab, with no C compiler needed.
+ */
 #ifndef INTERP_H
 #define INTERP_H
 

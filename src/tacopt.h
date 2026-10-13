@@ -1,3 +1,11 @@
+/*
+ * tacopt.h : optimizations on the three-address code.
+ *
+ * This is the second optimizer. The first one (optimizer.c) works on the tree
+ * and only reorders multiplications. This one works on the flat TAC list and
+ * removes repeated work and does simple algebra (X * identity = X, ...).
+ * The technique is called LOCAL VALUE NUMBERING, explained in tacopt.c.
+ */
 #ifndef TACOPT_H
 #define TACOPT_H
 

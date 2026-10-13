@@ -1,20 +1,26 @@
-#ifndef DIAG_H
-#define DIAG_H
-
-#include <stdio.h>
-
-/* Error messages that show the offending source line with a ^ under the
- * problem, like this:
+/*
+ * diag.h : pretty error messages (diagnostics).
+ *
+ * A plain message like "expected an identifier" is hard to use when the
+ * program is long. So the compiler prints the offending source line and puts
+ * a ^ under the problem, like this:
  *
  *   Parse error at line 3, column 9: expected an identifier ...
  *      3 | R = A +
  *        |         ^
  *
- * The parser stores the program text once with diag_set_source; the parser
- * and the semantic checker then call diag_print for each error they report.
+ * HOW IT IS USED
+ * The driver gives the program text to diag_set_source() once. After that the
+ * parser and the semantic checker call diag_print() for each error they
+ * report. diag.c looks the line up in the saved text and draws the caret.
  */
+#ifndef DIAG_H
+#define DIAG_H
 
-/* Keeps a copy of the program text (replacing any earlier one). */
+#include <stdio.h>
+
+/* Keeps a private copy of the program text (replacing any earlier one).
+ * Passing NULL just forgets the old text. */
 void diag_set_source(const char *src);
 
 /* Prints one error. `kind` is "Parse" or "Semantic". col is counted from 1

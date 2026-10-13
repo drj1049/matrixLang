@@ -1,3 +1,19 @@
+/*
+ * tac.h : Three-Address Code (TAC), the compiler's intermediate language.
+ *
+ * WHY HAVE AN INTERMEDIATE LANGUAGE?
+ * A tree is good for checking a program, but awkward to run or to turn into
+ * C. TAC flattens the tree into a simple list of small steps, where every
+ * step does ONE thing. For example   D = A * B + C   becomes
+ *
+ *     t0 = A * B
+ *     t1 = t0 + C
+ *     D  = t1
+ *
+ * Such a flat list is easy to optimize (tacopt.c), to run (interp.c) and to
+ * translate to C (codegen.c). The interpreter and the C generator both
+ * read exactly this list, so they always agree with each other.
+ */
 #ifndef TAC_H
 #define TAC_H
 
@@ -21,23 +37,25 @@
  *   OUTPUT a                        (the matrix handed back to the caller)
  */
 typedef enum {
-    TAC_LOAD_MATRIX,
-    TAC_GEN,
-    TAC_SCALE,
-    TAC_BINOP,
-    TAC_CALL,
-    TAC_COPY,
+    TAC_LOAD_MATRIX,   /* create a matrix from a literal */
+    TAC_GEN,           /* create identity(n) or zeros(r, c) */
+    TAC_SCALE,         /* result = number * matrix */
+    TAC_BINOP,         /* result = a + b, a - b or a * b */
+    TAC_CALL,          /* result = add/subtract/multiply/transpose/inverse(...) */
+    TAC_COPY,          /* result = another variable */
     TAC_PRINT,
     TAC_INPUT,
     TAC_OUTPUT
 } TACOp;
 
 #define TAC_NAME_MAX 64
-#define TAC_MAX_CALL_ARGS 16
+#define TAC_MAX_CALL_ARGS 16   /* most arguments one call can hold */
 
+/* One instruction. Like ASTNode, one struct serves every kind: `op` says
+ * which kind, and each kind only uses the fields noted below. */
 typedef struct {
     TACOp op;
-    int line;
+    int line;                    /* source line it came from (for debugging) */
 
     char result[TAC_NAME_MAX];   /* every op except PRINT/OUTPUT writes a result;
                                     for INPUT it is the declared name */
@@ -68,6 +86,7 @@ typedef struct {
     double **matrix_values;      /* owned deep copy of the literal's numbers */
 } TACInstr;
 
+/* The whole program: a plain array of instructions, run from first to last. */
 typedef struct {
     TACInstr *instrs;
     int count;
