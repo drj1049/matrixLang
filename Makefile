@@ -12,7 +12,7 @@ BINS   = build/compiler $(STAGES:%=build/%_test)
 GOOD = sample1 sample4_chain sample10_gen sample13_scale sample16_cse sample17_algebra sample21_parens sample23_paren_chain
 BAD  = sample2_bad sample3_undefined sample7_bad_input sample8_bad_output sample11_bad_size sample14_bad_number
 
-.PHONY: all test fuzz sanitize run ui clean
+.PHONY: all test fuzz sanitize servercheck run ui clean
 
 all: $(BINS)
 
@@ -136,6 +136,10 @@ sanitize: | build
 		fi; \
 	done; \
 	if [ $$fail = 0 ]; then echo "PASS sanitizers: no problems in $$(ls tests/sample*.matlang | wc -l | tr -d ' ') samples"; else exit 1; fi
+
+# the web server as it runs on the internet: limits, refusals, rate limit
+servercheck: build/compiler build/tac_test build/optimizer_prog_test
+	python3 tests/server_check.py
 
 # local web page: make ui, then open http://localhost:8000
 ui: build/compiler build/tac_test build/optimizer_prog_test

@@ -1,0 +1,11 @@
+# keep the machine's own build files out of the image: the image builds its own
+.git
+.github
+build/
+tests/*_test
+*.o
+*.out
+*.exe
+*.dSYM/
+.DS_Store
+__pycache__/

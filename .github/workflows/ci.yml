@@ -20,3 +20,6 @@ jobs:
 
       - name: Memory and undefined-behaviour checks
         run: make sanitize
+
+      - name: Web server limits (public mode)
+        run: make servercheck

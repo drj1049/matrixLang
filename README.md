@@ -54,6 +54,8 @@ matrixLang/
     fuzz.py                 random program tester (checks the compiler against Python)
     sample*.matlang         valid and deliberately broken programs
   .github/workflows/ci.yml  runs the checks on every push
+  Dockerfile  render.yaml   put the web page online (see "Putting it online")
+  server.py   runlimited.py the web page's server, and the helper that limits what a run may use
   Makefile                  make, make test, make run FILE=...
   LICENSE                   MIT
   matlangc                  one command: compile a .matlang file to C, build it and run it
@@ -206,6 +208,23 @@ python3 server.py        # or: make ui
 
 Then open http://localhost:8000. Pick a sample or type your own program and press Run (Cmd+Enter). The server only listens on your own computer, and needs Python 3, gcc and make. Programs with `input`/`output` show the generated function and header instead of running.
 
+## Putting it online
+
+The page is not static: for every Run the server compiles the program to C and builds it with gcc. So it needs a host that can run a container with Python, gcc and make (GitHub Pages and Netlify cannot). The `Dockerfile` sets that up, and `render.yaml` describes the service for Render.
+
+On Render (free plan): create an account, choose New > Web Service, connect this GitHub repository, and leave the settings alone. Render finds the Dockerfile, builds it, and gives you a link like `https://matrixlang.onrender.com`. Choosing New > Blueprint instead reads `render.yaml`. After that every push to `main` redeploys the site by itself.
+
+Because strangers can use the link, the server runs in public mode (`MATRIXLANG_PUBLIC=1`, set in the Dockerfile) and limits every run:
+
+- the compiled program gets 5 seconds and 256 MB of memory, and may print at most 1 MB (the page shows the first 200,000 characters)
+- the compiler and gcc get 10 seconds and 768 MB
+- two runs at a time (others wait up to 20 seconds), and 20 runs a minute per visitor
+- programs are limited to 20,000 characters, and run as an ordinary user inside the container
+
+The free plan puts the site to sleep after 15 minutes without visitors, and the first visit afterwards takes about a minute to wake it up. `/healthz` answers `ok` and is what the host uses to check the server is alive.
+
+To try the same setup on your own computer (needs Docker): `docker build -t matrixlang .` then `docker run -p 8000:10000 -e PORT=10000 matrixlang`, and open http://localhost:8000.
+
 ## Compiling to a callable C function
 
 A program that declares its matrices with `input` and names a result with `output` compiles to a C function instead of a standalone program:
@@ -248,6 +267,8 @@ Rules:
 
 Working: lexer, parser, AST, a written grammar, parentheses in expressions, reporting several errors at once with a caret under each problem, semantic analysis with symbol table, negative numbers in matrix literals, `identity` and `zeros`, scalar multiplication and unary minus, an `-O0` switch for the optimizer, matrix chain multiplication optimizer, common subexpression reuse and algebraic rewrites on the TAC, three-address code generation, an interpreter that performs real matrix arithmetic including inversion via Gauss-Jordan elimination, and C code generation (standalone program or callable function) with a loop-tiled multiply.
 
-`make sanitize` builds the compiler with the address and undefined-behaviour sanitizers and runs every sample through it. The same three commands (`make test`, `make fuzz`, `make sanitize`) run on GitHub for every push (see the CI badge at the top).
+`make servercheck` starts the web server in the same public mode it uses online and checks its limits: it stops a program that runs too long, needs too much memory or prints too much, refuses requests from other websites, and limits how often one visitor can run programs.
+
+`make sanitize` builds the compiler with the address and undefined-behaviour sanitizers and runs every sample through it. The same commands (`make test`, `make fuzz`, `make sanitize` and `make servercheck`) run on GitHub for every push (see the CI badge at the top).
 
 `make test` checks that compiled output matches the interpreter (with the optimizer on and off), that the generated functions return correct, freshly allocated results, and that the broken samples are rejected with exactly the expected messages and carets (the expected text is kept in `tests/*.expected`). `make fuzz` generates random programs and checks every stage (interpreter and compiled C, optimizer on and off) against an independent Python calculation.

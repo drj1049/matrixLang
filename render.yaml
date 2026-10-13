@@ -1,0 +1,8 @@
+# Render reads this file when you choose New > Blueprint (see README, "Putting it online").
+services:
+  - type: web
+    name: matrixlang
+    runtime: docker
+    plan: free
+    healthCheckPath: /healthz
+    autoDeployTrigger: commit

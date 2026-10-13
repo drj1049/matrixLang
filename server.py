@@ -1,34 +1,68 @@
 #!/usr/bin/env python3
-"""Local web page for the MatrixLang compiler.
+"""Web page for the MatrixLang compiler.
 
     python3 server.py        then open http://localhost:8000
 
-It only listens on this computer. For every Run it saves the program to a
-temporary folder, calls the programs that make already built in build/
-(the compiler, the TAC printer and the optimizer printer), and for normal
-programs also compiles and runs the generated C with gcc.
+By default it only listens on this computer. For every Run it saves the
+program to a temporary folder, calls the programs that make already built in
+build/ (the compiler, the TAC printer and the optimizer printer), and for
+normal programs also compiles and runs the generated C with gcc.
+
+To put it on the internet (see the Dockerfile), these environment variables
+change how it behaves:
+
+    HOST=0.0.0.0              listen on every network address, not just this computer
+    PORT=10000                the port to listen on (hosts such as Render set this)
+    MATRIXLANG_PUBLIC=1       accept any host name, and apply the limits below
+                              to strangers' programs (time, memory, output size,
+                              how many runs at once, how many runs per minute)
+    NO_BROWSER=1              do not open a browser window at start
 """
 import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlparse
+
+try:
+    import resource            # Linux and macOS only
+except ImportError:
+    resource = None
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 WEB = os.path.join(ROOT, "web")
 TESTS = os.path.join(ROOT, "tests")
-HOST = "127.0.0.1"
+HOST = os.environ.get("HOST", "127.0.0.1")
 PORT = int(os.environ.get("PORT", "8000"))
+PUBLIC = os.environ.get("MATRIXLANG_PUBLIC") == "1"
 
 MAX_CODE = 20000        # characters of MatrixLang source per run
 MAX_BODY = 100000       # bytes of request
 TOOL_TIMEOUT = 10       # seconds for the compiler stages and gcc
 RUN_TIMEOUT = 5         # seconds for the compiled program
+
+# limits for every program the server starts (the compiler stages, gcc and the
+# compiled program), so one visitor cannot use up the whole machine
+TOOL_MEMORY = 768 * 1024 * 1024    # bytes of memory for the compiler stages and gcc
+RUN_MEMORY = 256 * 1024 * 1024     # bytes of memory for the compiled program
+RUN_OUTPUT = 1024 * 1024           # the compiled program may write at most this much
+SHOW_OUTPUT = 200000               # characters of its output sent to the page
+MAX_AT_ONCE = 2                    # runs happening at the same moment
+WAIT_FOR_SLOT = 20                 # seconds a run waits for its turn before giving up
+RATE_RUNS = 20                     # runs allowed per visitor ...
+RATE_WINDOW = 60                   # ... in this many seconds (public mode only)
+
+slots = threading.BoundedSemaphore(MAX_AT_ONCE)
+recent_runs = {}                   # visitor address -> times of their latest runs
+recent_lock = threading.Lock()
 
 COMPILER = os.path.join(ROOT, "build", "compiler")
 TAC_TOOL = os.path.join(ROOT, "build", "tac_test")
@@ -36,15 +70,38 @@ OPT_TOOL = os.path.join(ROOT, "build", "optimizer_prog_test")
 FUNC_NAME = "matlang_compute"
 
 
-def run(cmd, cwd=None, timeout=TOOL_TIMEOUT):
-    """Returns (exit_code, stdout, stderr). Exit code 124 means timed out."""
+def run(cmd, cwd=None, timeout=TOOL_TIMEOUT, memory=TOOL_MEMORY, stdout_file=None, file_bytes=16 * 1024 * 1024):
+    """Returns (exit_code, stdout, stderr). Exit code 124 means timed out.
+
+    The program runs in its own process group, so a timeout also stops
+    anything it started (gcc starts several helper programs). On a public
+    server it is started through runlimited.py, which caps its memory, CPU
+    time and file size. With stdout_file the output goes to that file instead
+    of being collected, so a program that prints without end hits the file
+    size limit instead of filling the server's memory."""
+    if PUBLIC and resource is not None:
+        cmd = [sys.executable, "-S", os.path.join(ROOT, "runlimited.py"),
+               str(memory), str(timeout + 1), str(file_bytes)] + cmd
+    out = open(stdout_file, "wb") if stdout_file else subprocess.PIPE
     try:
-        p = subprocess.run(cmd, cwd=cwd, stdout=subprocess.PIPE,
-                           stderr=subprocess.PIPE, universal_newlines=True,
-                           timeout=timeout)
-        return p.returncode, p.stdout, p.stderr
-    except subprocess.TimeoutExpired:
-        return 124, "", "timed out after %d seconds" % timeout
+        p = subprocess.Popen(cmd, cwd=cwd, stdout=out, stderr=subprocess.PIPE,
+                             universal_newlines=not stdout_file,
+                             start_new_session=True)
+        try:
+            stdout, stderr = p.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(p.pid, signal.SIGKILL)
+            except OSError:
+                pass
+            p.communicate()
+            return 124, "", "timed out after %d seconds" % timeout
+        if stdout_file:
+            stdout, stderr = "", stderr.decode("utf-8", "replace")
+        return p.returncode, stdout, stderr
+    finally:
+        if stdout_file:
+            out.close()
 
 
 def build_tools():
@@ -74,6 +131,16 @@ def error_lines(text):
 
 
 def run_pipeline(code, optimize=True):
+    """Runs one program, but only MAX_AT_ONCE at the same moment."""
+    if not slots.acquire(timeout=WAIT_FOR_SLOT):
+        return {"ok": False, "error": "The server is busy right now. Try again in a few seconds."}
+    try:
+        return run_one(code, optimize)
+    finally:
+        slots.release()
+
+
+def run_one(code, optimize=True):
     started = time.time()
     if not code.strip():
         return {"ok": False, "error": "Write a program first."}
@@ -148,9 +215,23 @@ def run_pipeline(code, optimize=True):
                                 "-o", exe, "-lm"])
             if rc != 0:
                 return {"ok": False, "error": "gcc could not build the generated C:\n" + err.strip()}
-            rc, out, err = run([exe], timeout=RUN_TIMEOUT)
-            result["output"] = out
-            if rc != 0:
+            out_path = os.path.join(tmp, "prog.out")
+            rc, _, err = run([exe], timeout=RUN_TIMEOUT, memory=RUN_MEMORY,
+                             stdout_file=out_path, file_bytes=RUN_OUTPUT)
+            with open(out_path, "rb") as f:
+                out = f.read(SHOW_OUTPUT + 1).decode("utf-8", "replace")
+            too_big = os.path.getsize(out_path) >= RUN_OUTPUT
+            truncated = len(out) > SHOW_OUTPUT
+            result["output"] = out[:SHOW_OUTPUT] + ("\n... (output cut off here)\n" if truncated else "")
+            if rc == 124:
+                result["run_error"] = "The program took longer than %d seconds, so it was stopped." % RUN_TIMEOUT
+            elif rc == -signal.SIGXFSZ or too_big:
+                result["run_error"] = "The program printed too much output, so it was stopped."
+            elif rc in (-signal.SIGXCPU, -signal.SIGKILL):
+                result["run_error"] = "The program used too much time or memory, so it was stopped."
+            elif rc < 0:
+                result["run_error"] = "The program crashed (signal %d)." % -rc
+            elif rc != 0:
                 result["run_error"] = (err.strip() or "The program exited with code %d." % rc)
 
         result["ms"] = int((time.time() - started) * 1000)
@@ -171,19 +252,42 @@ def list_samples():
 
 class Handler(BaseHTTPRequestHandler):
     server_version = "MatrixLangUI"
+    timeout = 15        # seconds a visitor may take to send a request
 
     def log_message(self, fmt, *args):
         pass  # keep the terminal quiet
 
     def _allowed(self):
-        """Only this computer's own page may talk to the server."""
-        host = (self.headers.get("Host") or "").split(":")[0]
-        if host not in ("localhost", "127.0.0.1"):
-            return False
+        """On your own computer only this computer's own page may talk to the
+        server. On a public server any host name is fine, but a request sent
+        from some other website's page is refused."""
+        host = self.headers.get("Host") or ""
         origin = self.headers.get("Origin")
+        if PUBLIC:
+            return not origin or urlparse(origin).netloc == host
+        if host.split(":")[0] not in ("localhost", "127.0.0.1"):
+            return False
         if origin and origin not in ("http://localhost:%d" % PORT, "http://127.0.0.1:%d" % PORT):
             return False
         return True
+
+    def _too_many_runs(self):
+        """True when this visitor has used up their runs for the moment (public server only)."""
+        if not PUBLIC:
+            return False
+        who = (self.headers.get("X-Forwarded-For") or self.client_address[0]).split(",")[0].strip()
+        now = time.time()
+        with recent_lock:
+            times = [t for t in recent_runs.get(who, []) if now - t < RATE_WINDOW]
+            if len(times) >= RATE_RUNS:
+                recent_runs[who] = times
+                return True
+            times.append(now)
+            recent_runs[who] = times
+            if len(recent_runs) > 5000:      # forget visitors who have gone quiet
+                for k in [k for k, v in recent_runs.items() if not v or now - v[-1] >= RATE_WINDOW]:
+                    del recent_runs[k]
+        return False
 
     def _send(self, status, body, ctype):
         data = body if isinstance(body, bytes) else body.encode("utf-8")
@@ -191,6 +295,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
         self.wfile.write(data)
 
@@ -198,9 +303,11 @@ class Handler(BaseHTTPRequestHandler):
         self._send(status, json.dumps(obj), "application/json; charset=utf-8")
 
     def do_GET(self):
+        path = self.path.split("?")[0]
+        if path == "/healthz":          # the hosting service asks this to see the server is alive
+            return self._send(200, "ok", "text/plain; charset=utf-8")
         if not self._allowed():
             return self._json(403, {"error": "forbidden"})
-        path = self.path.split("?")[0]
         if path in ("/", "/index.html"):
             with open(os.path.join(WEB, "index.html"), "rb") as f:
                 return self._send(200, f.read(), "text/html; charset=utf-8")
@@ -229,6 +336,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(400, {"ok": False, "error": "bad request"})
         if not isinstance(code, str) or not isinstance(optimize, bool):
             return self._json(400, {"ok": False, "error": "bad request"})
+        if self._too_many_runs():
+            return self._json(429, {"ok": False, "error": "Too many runs from your address. Wait a minute and try again."})
         self._json(200, run_pipeline(code, optimize))
 
 
@@ -239,8 +348,11 @@ def main():
     except OSError:
         sys.exit("Port %d is busy. Try: PORT=8001 python3 server.py" % PORT)
     url = "http://localhost:%d" % PORT
-    print("MatrixLang UI running at %s  (Ctrl+C to stop)" % url)
-    if not os.environ.get("NO_BROWSER"):
+    if HOST in ("127.0.0.1", "localhost"):
+        print("MatrixLang UI running at %s  (Ctrl+C to stop)" % url)
+    else:
+        print("MatrixLang UI listening on %s:%d  (Ctrl+C to stop)" % (HOST, PORT), flush=True)
+    if not os.environ.get("NO_BROWSER") and not PUBLIC:
         try:
             webbrowser.open(url)
         except Exception:
