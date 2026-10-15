@@ -47,7 +47,10 @@ int main(int argc, char **argv) {
 
     /* what the TAC optimizer changed goes to a scratch file, printed after the code */
     FILE *notes = tmpfile();
-    if (optimize) tac_optimize(&tac, notes);
+    if (optimize) {
+        tac_optimize(&tac, notes);
+        tac_eliminate_dead(&tac, notes);
+    }
 
     printf("Three-address code:\n\n");
     tac_print(&tac);

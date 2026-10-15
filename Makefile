@@ -9,7 +9,7 @@ HDRS = $(wildcard src/*.h)
 STAGES = lexer parser semantic optimizer optimizer_prog tac interp
 BINS   = build/compiler $(STAGES:%=build/%_test)
 
-GOOD = sample1 sample4_chain sample10_gen sample13_scale sample16_cse sample17_algebra sample21_parens sample23_paren_chain
+GOOD = sample1 sample4_chain sample10_gen sample13_scale sample16_cse sample17_algebra sample21_parens sample23_paren_chain sample25_dead sample27_all_dead
 BAD  = sample2_bad sample3_undefined sample7_bad_input sample8_bad_output sample11_bad_size sample14_bad_number
 
 .PHONY: all test fuzz sanitize servercheck run ui clean
@@ -64,7 +64,7 @@ test: all
 		echo "PASS $$s with -O0 (same answer with the optimizer off)" || \
 		{ echo "FAIL $$s with -O0"; exit 1; }; \
 	done
-	@for s in sample16_cse sample17_algebra sample20_cse_func; do \
+	@for s in sample16_cse sample17_algebra sample20_cse_func sample25_dead; do \
 		./build/compiler tests/$$s.matlang build/$$s.c cse_func && \
 		./build/compiler -O0 tests/$$s.matlang build/$$s.O0.c cse_func && \
 		a=$$(grep -E -c 'mat_(mul|add|sub|scale|transpose|inverse)\(' build/$$s.c); \
@@ -79,12 +79,17 @@ test: all
 			echo "PASS -O0 changes the multiplication order in $$s"; \
 		fi; \
 	done
+	@./build/tac_test tests/sample25_dead.matlang > build/sample25_dead.tac.txt && \
+	diff build/sample25_dead.tac.txt tests/sample25_dead.tac.expected > /dev/null && \
+	echo "PASS sample25_dead (dead code is removed, TAC and notes match tests/sample25_dead.tac.expected)" || \
+	{ echo "FAIL sample25_dead (TAC differs from tests/sample25_dead.tac.expected):"; diff build/sample25_dead.tac.txt tests/sample25_dead.tac.expected; exit 1; }
 	@./build/compiler tests/sample5_func.matlang build/sample5_func.c && \
 	./build/compiler tests/sample6_alias.matlang build/sample6_alias.c alias_copy && \
 	./build/compiler tests/sample12_gen_func.matlang build/sample12_gen_func.c gen_func && \
 	./build/compiler tests/sample15_scale_func.matlang build/sample15_scale_func.c scale_func && \
 	./build/compiler tests/sample20_cse_func.matlang build/sample20_cse_func.c cse_func && \
-	$(CC) $(CFLAGS) -Ibuild tests/func_caller.c build/sample5_func.c build/sample6_alias.c build/sample12_gen_func.c build/sample15_scale_func.c build/sample20_cse_func.c \
+	./build/compiler tests/sample26_dead_func.matlang build/sample26_dead_func.c dead_func && \
+	$(CC) $(CFLAGS) -Ibuild tests/func_caller.c build/sample5_func.c build/sample6_alias.c build/sample12_gen_func.c build/sample15_scale_func.c build/sample20_cse_func.c build/sample26_dead_func.c \
 		-o build/func_caller $(LDLIBS) && \
 	./build/func_caller && \
 	echo "PASS func_caller (generated functions return the right, freshly allocated result)" || \
@@ -93,6 +98,12 @@ test: all
 		echo "FAIL func_caller (wrong-sized input should have been rejected)"; exit 1; \
 	else \
 		echo "PASS func_caller (rejected: $$(cat build/func_caller.err.txt))"; \
+	fi
+	@./build/func_caller singular 2> build/func_caller_singular.err.txt; rc=$$?; \
+	if [ $$rc -eq 1 ] && grep -q singular build/func_caller_singular.err.txt; then \
+		echo "PASS func_caller (an unused inverse is not removed: $$(cat build/func_caller_singular.err.txt))"; \
+	else \
+		echo "FAIL func_caller (an unused inverse of a singular matrix must still stop the program, exit code $$rc)"; exit 1; \
 	fi
 	@for s in sample18_many_errors sample19_many_sem_errors; do \
 		if ./build/compiler tests/$$s.matlang build/$$s.c 2> build/$$s.err.txt; then \

@@ -1,0 +1,10 @@
+# a function with dead code: D, E and F are not needed for the result and
+# input Z is never used, but the function still takes all three inputs
+input A 2x2
+input B 2x2
+input Z 2x2
+D = A * B
+E = D + A
+F = inverse(A)
+R = A + B
+output R

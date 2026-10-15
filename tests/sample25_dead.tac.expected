@@ -1,0 +1,35 @@
+Three-address code:
+
+t0   = LOADMATRIX 2x2
+A    = t0
+t1   = LOADMATRIX 2x2
+B    = t1
+t7   = A - B
+G    = t7
+t8   = A + B
+F    = t8
+t9   = F * A
+X    = t9
+PRINT X
+t10  = X + F
+X    = t10
+PRINT X
+PRINT G
+t12  = A
+H    = t12
+PRINT H
+t13  = LOADMATRIX 2x2
+P    = t13
+t14  = inverse(P)
+
+=== notes ===
+REWRITE	28	A * identity(2) simplifies to A
+REMOVE	6	C is assigned here but this value is never used, so the assignment is removed
+REMOVE	7	D is assigned here but this value is never used, so the assignment is removed
+REMOVE	8	E is assigned here but this value is never used, so the assignment is removed
+REMOVE	9	S is assigned here but this value is never used, so the assignment is removed
+REMOVE	12	K is assigned here but this value is never used, so the assignment is removed
+REMOVE	13	L is assigned here but this value is never used, so the assignment is removed
+REMOVE	16	G is assigned here but this value is never used, so the assignment is removed
+REMOVE	28	identity(2) is not needed any more, so it is removed
+REMOVE	33	Q is assigned here but this value is never used, so the assignment is removed

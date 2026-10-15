@@ -348,7 +348,12 @@ def make_program(rng):
         if rng.random() < 0.3:
             lines.append("print(%s)" % name)
             expected.append(fmt(name, val))
+    # half of the programs print only some of the final variables, so the rest
+    # (and everything that only fed them) is dead code for the optimizer
+    only_some = rng.random() < 0.5
     for n in sorted(env):
+        if only_some and rng.random() < 0.5:
+            continue
         lines.append("print(%s)" % n)
         expected.append(fmt(n, env[n]))
     return "\n".join(lines) + "\n", "".join(expected)

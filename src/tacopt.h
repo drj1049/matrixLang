@@ -5,6 +5,8 @@
  * and only reorders multiplications. This one works on the flat TAC list and
  * removes repeated work and does simple algebra (X * identity = X, ...).
  * The technique is called LOCAL VALUE NUMBERING, explained in tacopt.c.
+ * A third step, dead code elimination, then removes instructions whose
+ * result nothing reads (see tac_eliminate_dead at the end of this file).
  */
 #ifndef TACOPT_H
 #define TACOPT_H
@@ -39,5 +41,22 @@
  * Returns how many instructions were changed.
  */
 int tac_optimize(TACProgram *tac, FILE *notes);
+
+/* ---- Dead code elimination ----
+ * Removes every instruction whose result is never read, working backwards
+ * through the (straight-line) program. Run it AFTER tac_optimize(), which
+ * tends to leave work behind that nothing uses any more (for example the
+ * identity(2) in A * identity(2), once that product became a plain copy).
+ *
+ * Never removed: PRINT, OUTPUT, INPUT (a function's inputs are part of its
+ * signature), and inverse(...), because inverting a singular matrix is a
+ * runtime error that dropping the call would hide. Surviving instructions
+ * keep their order.
+ *
+ * If notes is not NULL, one line per removed assignment is written to it:
+ *     REMOVE <tab> line <tab> text
+ * Returns how many instructions were removed.
+ */
+int tac_eliminate_dead(TACProgram *tac, FILE *notes);
 
 #endif /* TACOPT_H */

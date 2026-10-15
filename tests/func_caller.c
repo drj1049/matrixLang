@@ -1,23 +1,37 @@
 /* Calls the functions generated from sample5_func.matlang,
- * sample6_alias.matlang, sample12_gen_func.matlang, sample15_scale_func.matlang
- * and sample20_cse_func.matlang the way a real project would: through the
- * generated headers, many times, with its own arrays.
+ * sample6_alias.matlang, sample12_gen_func.matlang, sample15_scale_func.matlang,
+ * sample20_cse_func.matlang and sample26_dead_func.matlang the way a real
+ * project would: through the generated headers, many times, with its own arrays.
  * usage: func_caller            check the results
  *        func_caller badsize    pass a wrong-sized matrix (must exit 1)
+ *        func_caller singular   pass a singular matrix to a function whose only use
+ *                               of inverse() is dead code (must still exit 1)
  */
 #include <stdio.h>
+#include <string.h>
 #include <math.h>
 #include "sample5_func.h"
 #include "sample6_alias.h"
 #include "sample12_gen_func.h"
 #include "sample15_scale_func.h"
 #include "sample20_cse_func.h"
+#include "sample26_dead_func.h"
 
 int main(int argc, char **argv) {
     double a[] = {1, 2, 3, 4, 5, 6};
     double b[] = {7, 8, 9, 10, 11, 12};
     double c[] = {1, 2, 3, 4};
     Mat A = {2, 3, a}, B = {3, 2, b}, C = {2, 2, c};
+
+    if (argc > 1 && strcmp(argv[1], "singular") == 0) {
+        /* dead_func computes inverse(A) but never uses it. The compiler must
+         * keep that call, so a singular A is still reported as an error. */
+        double sing[] = {1, 2, 2, 4};
+        Mat S = {2, 2, sing};
+        Mat R = dead_func(S, C, C);
+        mat_free(R);
+        return 0; /* not reached: inverse() of a singular matrix exits */
+    }
 
     if (argc > 1) {
         Mat wrong = {3, 3, a};
@@ -90,6 +104,24 @@ int main(int argc, char **argv) {
         }
     }
     mat_free(K);
+
+    /* dead_func returns A + B. D, E and F are dead code, and Z is never used,
+     * yet the function still takes all three inputs (the call below would not
+     * compile otherwise) and leaves them untouched */
+    Mat DR = dead_func(C, C, C);
+    double want_dr[] = {2, 4, 6, 8};
+    if (DR.r != 2 || DR.c != 2) { printf("dead_func returned the wrong size\n"); return 1; }
+    for (int i = 0; i < 4; i++) {
+        if (DR.d[i] != want_dr[i]) {
+            printf("dead_func wrong value at %d: got %g, want %g\n", i, DR.d[i], want_dr[i]);
+            return 1;
+        }
+    }
+    mat_free(DR);
+    if (c[0] != 1 || c[1] != 2 || c[2] != 3 || c[3] != 4) {
+        printf("dead_func modified its inputs\n");
+        return 1;
+    }
 
     return 0;
 }

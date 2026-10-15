@@ -79,7 +79,10 @@ int main(int argc, char **argv) {
     semantic_check(&prog);
     if (optimize) optimize_program(&prog);
     TACProgram tac = tac_generate(&prog);
-    if (optimize) tac_optimize(&tac, NULL);
+    if (optimize) {
+        tac_optimize(&tac, NULL);
+        tac_eliminate_dead(&tac, NULL);
+    }
 
     FILE *out = fopen(pos[1], "w");
     if (!out) { perror("fopen"); return 1; }

@@ -505,3 +505,278 @@ int tac_optimize(TACProgram *tac, FILE *notes) {
     vns = NULL; vars = NULL;
     return changes;
 }
+
+/* ====================================================================
+ * DEAD CODE ELIMINATION
+ *
+ * An instruction is DEAD when the value it stores is never read: not by a
+ * later instruction, not by PRINT, not by OUTPUT. Running it changes nothing
+ * the outside world can see, so it can go.
+ *
+ *     A = [[1,2],[3,4]]
+ *     B = A * A            <- B is never used again, so this is dead
+ *     print(A)
+ *
+ * Once B's instruction is gone, anything that only existed to feed B is dead
+ * too, so a whole chain of unused work disappears in a single pass.
+ *
+ * THE METHOD: LIVENESS, WORKING BACKWARDS
+ * Walk the instructions from the LAST to the FIRST and keep a set of "live"
+ * names: names whose current value is still read later on.
+ *   - PRINT and OUTPUT read a name, so that name becomes live.
+ *   - An instruction that writes the name N:
+ *       if N is not live, nobody ever reads this value. When the instruction
+ *       is safe to drop it is dead: remove it and do NOT mark its operands
+ *       live, since only this instruction needed them.
+ *       Otherwise N's value is needed, but the value N held BEFORE this
+ *       instruction is not, so N stops being live; then every operand the
+ *       instruction reads becomes live.
+ * The code is straight-line (no loops, no branches), so one backward pass is
+ * exact. There is no need to repeat it until nothing changes.
+ *
+ * WHAT IS NEVER REMOVED
+ *   - PRINT and OUTPUT: they are what the program is for.
+ *   - INPUT: an input is part of the function's signature, and its size is
+ *     checked when the function starts, even if nothing reads it.
+ *   - inverse(...): inverting a singular matrix stops the program with a
+ *     runtime error. Dropping an unused inverse would hide that error, and
+ *     the program would behave differently from the same program at -O0.
+ *     (Its operand stays live, so everything it needs is kept as well.)
+ * Every other instruction only computes a value, so it is safe to drop.
+ * ==================================================================== */
+
+/* Every distinct name in the program (variables, inputs, temporaries), numbered
+ * 0, 1, 2, ... in order of first appearance, plus the live flag of each, so
+ * "is this name live?" is a plain array lookup. */
+typedef struct {
+    char (*names)[TAC_NAME_MAX];   /* names[id] is the text of name number id */
+    char *live;                    /* live[id] != 0: this name's value is still read later */
+    int count, cap;
+} NameTable;
+
+static void dce_out_of_memory(void) {
+    fprintf(stderr, "internal error: out of memory in dead code elimination\n");
+    exit(1);
+}
+
+/* A zeroed array of `count` bytes (at least one, so it is never NULL). */
+static char *dce_flags(size_t count) {
+    char *p = calloc(count + 1, 1);
+    if (!p) dce_out_of_memory();
+    return p;
+}
+
+/* The number of a name. A name seen for the first time is added to the table,
+ * and starts out not live. Careful: adding can move t->live in memory, so never
+ * write  t->live[dce_name_id(t, x)]  in one expression; get the id first. */
+static int dce_name_id(NameTable *t, const char *name) {
+    for (int i = 0; i < t->count; i++) {
+        if (strcmp(t->names[i], name) == 0) return i;
+    }
+    if (t->count == t->cap) {
+        int cap = t->cap ? t->cap * 2 : 32;
+        char (*names)[TAC_NAME_MAX] = realloc(t->names, (size_t)cap * TAC_NAME_MAX);
+        if (!names) dce_out_of_memory();
+        t->names = names;
+        char *live = realloc(t->live, (size_t)cap);
+        if (!live) dce_out_of_memory();
+        t->live = live;
+        memset(t->live + t->cap, 0, (size_t)(cap - t->cap));   /* the new flags start at 0 */
+        t->cap = cap;
+    }
+    strncpy(t->names[t->count], name, TAC_NAME_MAX - 1);
+    t->names[t->count][TAC_NAME_MAX - 1] = '\0';
+    return t->count++;
+}
+
+/* Does this instruction store a value under the name in ->result? */
+static int dce_defines(const TACInstr *ins) {
+    return ins->op != TAC_PRINT && ins->op != TAC_OUTPUT;
+}
+
+/* The names an instruction reads, written into used[]. Returns how many.
+ * (A call holds at most TAC_MAX_CALL_ARGS names, so never read past that.) */
+static int dce_uses(const TACInstr *ins, const char *used[TAC_MAX_CALL_ARGS]) {
+    switch (ins->op) {
+        case TAC_SCALE:
+            used[0] = ins->arg1;
+            return 1;
+        case TAC_BINOP:
+            used[0] = ins->arg1;
+            used[1] = ins->arg2;
+            return 2;
+        case TAC_CALL: {
+            int n = ins->call_arg_count;
+            if (n > TAC_MAX_CALL_ARGS) n = TAC_MAX_CALL_ARGS;
+            for (int i = 0; i < n; i++) used[i] = ins->call_args[i];
+            return n > 0 ? n : 0;
+        }
+        case TAC_COPY:
+        case TAC_PRINT:
+        case TAC_OUTPUT:
+            used[0] = ins->src;
+            return 1;
+        case TAC_LOAD_MATRIX:
+        case TAC_GEN:
+        case TAC_INPUT:
+            return 0;
+    }
+    return 0;
+}
+
+/* May this instruction be dropped when its result is never read? Only the ones
+ * that do nothing but compute a value (see "WHAT IS NEVER REMOVED" above). */
+static int dce_removable(const TACInstr *ins) {
+    switch (ins->op) {
+        case TAC_LOAD_MATRIX:
+        case TAC_GEN:
+        case TAC_SCALE:
+        case TAC_BINOP:
+        case TAC_COPY:
+            return 1;
+        case TAC_CALL:
+            return strcmp(ins->func_name, "inverse") != 0;
+        case TAC_PRINT:
+        case TAC_INPUT:
+        case TAC_OUTPUT:
+            return 0;
+    }
+    return 0;   /* an instruction kind this pass does not know: keep it */
+}
+
+/* The right-hand side of an instruction as words, for the notes. */
+static void dce_rhs_text(const TACInstr *ins, char *buf, size_t cap) {
+    char tmp[96];
+    buf[0] = '\0';
+    switch (ins->op) {
+        case TAC_LOAD_MATRIX:
+            snprintf(tmp, sizeof tmp, "a %dx%d matrix literal", ins->rows, ins->cols);
+            app(buf, cap, tmp);
+            break;
+        case TAC_GEN:
+            if (strcmp(ins->func_name, "identity") == 0) snprintf(tmp, sizeof tmp, "identity(%d)", ins->rows);
+            else snprintf(tmp, sizeof tmp, "zeros(%d, %d)", ins->rows, ins->cols);
+            app(buf, cap, tmp);
+            break;
+        case TAC_SCALE:
+            snprintf(tmp, sizeof tmp, "%.10g * ", ins->scalar);
+            app(buf, cap, tmp);
+            app(buf, cap, ins->arg1);
+            break;
+        case TAC_BINOP:
+            app(buf, cap, ins->arg1);
+            snprintf(tmp, sizeof tmp, " %c ", ins->binop);
+            app(buf, cap, tmp);
+            app(buf, cap, ins->arg2);
+            break;
+        case TAC_CALL:
+            app(buf, cap, ins->func_name);
+            app(buf, cap, "(");
+            for (int i = 0; i < ins->call_arg_count && i < TAC_MAX_CALL_ARGS; i++) {
+                if (i) app(buf, cap, ", ");
+                app(buf, cap, ins->call_args[i]);
+            }
+            app(buf, cap, ")");
+            break;
+        case TAC_COPY:
+            app(buf, cap, "a copy of ");
+            app(buf, cap, ins->src);
+            break;
+        default:
+            break;
+    }
+}
+
+/* One REMOVE note for every dead instruction, in program order.
+ *   - A dead assignment to a variable the user wrote gets a note of its own.
+ *   - A dead temporary usually just belongs to such an assignment (its chain
+ *     of work), so it only gets a note when its source line has no dead
+ *     assignment. That is the case where an earlier optimization left
+ *     something unused, such as the identity(2) in  A * identity(2). */
+static void dce_write_notes(const TACProgram *tac, const char *dead, FILE *notes) {
+    int max_line = 0;
+    for (int i = 0; i < tac->count; i++) {
+        if (dead[i] && tac->instrs[i].line > max_line) max_line = tac->instrs[i].line;
+    }
+    char *covered = dce_flags((size_t)max_line + 1);   /* covered[line]: a user assignment on that line was removed */
+    for (int i = 0; i < tac->count; i++) {
+        const TACInstr *ins = &tac->instrs[i];
+        if (dead[i] && !is_temp_name(ins->result) && ins->line >= 0) covered[ins->line] = 1;
+    }
+    for (int i = 0; i < tac->count; i++) {
+        const TACInstr *ins = &tac->instrs[i];
+        char text[400];
+        if (!dead[i]) continue;
+        if (!is_temp_name(ins->result)) {
+            snprintf(text, sizeof text, "%s is assigned here but this value is never used, so the assignment is removed",
+                     ins->result);
+            note(notes, "REMOVE", ins->line, text);
+        } else if (ins->line < 0 || !covered[ins->line]) {
+            char rhs[200];
+            dce_rhs_text(ins, rhs, sizeof rhs);
+            snprintf(text, sizeof text, "%s is not needed any more, so it is removed", rhs);
+            note(notes, "REMOVE", ins->line, text);
+        }
+    }
+    free(covered);
+}
+
+/* The entry point (see tacopt.h). */
+int tac_eliminate_dead(TACProgram *tac, FILE *notes) {
+    int n = tac->count;
+    if (n <= 0 || !tac->instrs) return 0;
+
+    NameTable names = { NULL, NULL, 0, 0 };
+    char *dead = dce_flags((size_t)n);       /* dead[i]: instruction i is removed */
+    int removed = 0;
+
+    /* backwards over the program: see the explanation above */
+    for (int i = n - 1; i >= 0; i--) {
+        const TACInstr *ins = &tac->instrs[i];
+        int result = -1;
+
+        if (dce_defines(ins)) {
+            result = dce_name_id(&names, ins->result);
+            if (!names.live[result] && dce_removable(ins)) {
+                dead[i] = 1;                  /* nobody reads this value: drop it, and ignore its operands */
+                removed++;
+                continue;
+            }
+            names.live[result] = 0;           /* the value from BEFORE this instruction is not needed */
+        }
+
+        const char *used[TAC_MAX_CALL_ARGS];
+        int nused = dce_uses(ins, used);
+        for (int k = 0; k < nused; k++) {
+            int id = dce_name_id(&names, used[k]);   /* may move names.live, so look it up first */
+            names.live[id] = 1;
+        }
+    }
+
+    if (removed > 0) {
+        if (notes) dce_write_notes(tac, dead, notes);
+
+        /* close the gaps: keep the surviving instructions in their original order */
+        int w = 0;
+        for (int i = 0; i < n; i++) {
+            TACInstr *ins = &tac->instrs[i];
+            if (dead[i]) {
+                if (ins->op == TAC_LOAD_MATRIX && ins->matrix_values) {   /* it owns a copy of the literal */
+                    for (int r = 0; r < ins->rows; r++) free(ins->matrix_values[r]);
+                    free(ins->matrix_values);
+                    ins->matrix_values = NULL;
+                }
+                continue;
+            }
+            if (w != i) tac->instrs[w] = *ins;
+            w++;
+        }
+        memset(&tac->instrs[w], 0, sizeof(TACInstr) * (size_t)(n - w));   /* no stale copies behind the end */
+        tac->count = w;
+    }
+
+    free(names.names);
+    free(names.live);
+    free(dead);
+    return removed;
+}

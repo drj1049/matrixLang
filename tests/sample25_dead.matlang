@@ -1,0 +1,33 @@
+# dead code elimination: work whose result is never printed is not done
+A = [[1,2],[3,4]]
+B = [[0,1],[1,0]]
+
+# a chain of values nobody uses
+C = A * B
+D = C + A
+E = transpose(D)
+S = 3 * E
+
+# copies of copies that are never used
+K = A
+L = K
+
+# overwritten before it is ever read, so the first value is dead
+G = A + A
+G = A - B
+
+# live: the printed values and everything they depend on
+F = A + B
+X = F * A
+print(X)
+X = X + F
+print(X)
+print(G)
+
+# the multiplication is simplified to a copy, which leaves identity(2) unused
+H = A * identity(2)
+print(H)
+
+# inverse can stop the program on a singular matrix, so it is never removed
+P = [[1,3],[0,1]]
+Q = inverse(P)

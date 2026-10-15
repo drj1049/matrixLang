@@ -46,7 +46,7 @@ matrixLang/
     semantic.h semantic.c   dimension checking and symbol table
     tac.h      tac.c        three-address code generation
     optimizer.h optimizer.c matrix chain multiplication reordering (dynamic programming)
-    tacopt.h   tacopt.c     TAC optimizer: common subexpression reuse and algebraic rewrites
+    tacopt.h   tacopt.c     TAC optimizer: common subexpression reuse, algebraic rewrites, dead code elimination
     interp.h   interp.c     executes TAC, does the actual matrix math
     codegen.h  codegen.c    turns TAC into C code (a main(), or a function plus a header)
     matrt.h                 small C runtime used by the generated code (tiled multiply etc.)
@@ -73,8 +73,9 @@ Source code goes through these stages, each one buildable and runnable on its ow
 4. **TAC generation** — converts the checked AST into three-address code
 5. **Optimizer** — reorders multiply chains so the fewest multiplications are done (runs after semantic analysis, before TAC)
 6. **TAC optimizer** — reuses repeated expressions and applies algebraic rewrites (runs on the TAC)
-7. **Execution** — runs the TAC in an interpreter and prints real computed matrices
-8. **Code generation** — writes the TAC out as C, using a loop-tiled multiply for cache locality
+7. **Dead code elimination**: removes instructions whose result is never used (runs on the TAC, after the TAC optimizer)
+8. **Execution** — runs the TAC in an interpreter and prints real computed matrices
+9. **Code generation** — writes the TAC out as C, using a loop-tiled multiply for cache locality
 
 ## Grammar
 
@@ -140,6 +141,26 @@ After the TAC is generated, `tacopt.c` runs local value numbering over it: every
 - **Algebraic rewrites**: `A * identity(n)` and `identity(n) * A` become `A`; `A + zeros(...)` becomes `A`; `A * zeros(...)` becomes `zeros(...)` of the right size; `1 * A` becomes `A`; `0 * A` becomes `zeros(...)`; `transpose(transpose(A))` becomes `A`; `inverse(inverse(A))` becomes `A`; `transpose` or `inverse` of `identity` is `identity`.
 
 The `inverse(inverse(A))` rewrite is exact in maths, but with floating-point numbers `-O0` (which really inverts twice) can differ from the optimized result in the last digits.
+
+## Dead code elimination
+
+Once the TAC optimizer is done, `tac_eliminate_dead()` (also in `tacopt.c`) removes every instruction whose result is never read. It goes through the TAC from the last instruction to the first and keeps a set of the names that are still needed, starting from every `print` and `output`. An assignment to a name that is not in that set is dead and is dropped without marking its operands as needed, so a whole chain of unused work disappears in one pass. The code has no loops or branches, so one backward pass is exact.
+
+```
+C = A * B          # removed: C is only used by D
+D = C + A          # removed: D is never used
+print(A)
+```
+
+It also cleans up after the other optimizations. In `H = A * identity(2)` the product becomes a plain copy of `A`, which leaves the `identity(2)` unused, and that is removed too. `./build/tac_test` lists every removal as a `REMOVE` line after the code.
+
+Three kinds of instruction are never removed:
+
+- `print` and `output`, since they are what the program is for.
+- `input`. Every input is part of the generated function's signature and has its size checked, even when the program never reads it.
+- `inverse(...)`. Inverting a singular matrix stops the program with an error, so dropping an unused `inverse` would hide that error and the program would behave differently from the same program with `-O0`. Its argument is kept as well.
+
+`-O0` switches it off together with the other TAC optimizations. `tests/sample25_dead.matlang` is an example (the expected TAC and notes are in `tests/sample25_dead.tac.expected`), `tests/sample26_dead_func.matlang` is a function with dead code and an unused input, and `tests/sample27_all_dead.matlang` is a program where everything is removed.
 
 ## Quick start
 
@@ -259,6 +280,7 @@ mat_free(C);
 Rules:
 
 - Inputs are only read. The function never modifies or frees them, and a program cannot assign to an input.
+- Every `input` is a parameter of the function, in the order written, even if the program never uses it. Its size is still checked.
 - The result is always newly allocated (even for `output A`), and the caller frees it with `mat_free`. Everything else the function allocates is freed before it returns.
 - Sizes are fixed at compile time, which is what lets the optimizer reorder multiply chains. Passing a matrix of a different size prints an error and exits. So does `inverse` of a singular matrix.
 - One `output` per program, as the last statement.
@@ -267,10 +289,10 @@ Rules:
 
 ## Status
 
-Working: lexer, parser, AST, a written grammar, parentheses in expressions, reporting several errors at once with a caret under each problem, semantic analysis with symbol table, negative numbers in matrix literals, `identity` and `zeros`, scalar multiplication and unary minus, an `-O0` switch for the optimizer, matrix chain multiplication optimizer, common subexpression reuse and algebraic rewrites on the TAC, three-address code generation, an interpreter that performs real matrix arithmetic including inversion via Gauss-Jordan elimination, and C code generation (standalone program or callable function) with a loop-tiled multiply.
+Working: lexer, parser, AST, a written grammar, parentheses in expressions, reporting several errors at once with a caret under each problem, semantic analysis with symbol table, negative numbers in matrix literals, `identity` and `zeros`, scalar multiplication and unary minus, an `-O0` switch for the optimizer, matrix chain multiplication optimizer, common subexpression reuse, algebraic rewrites and dead code elimination on the TAC, three-address code generation, an interpreter that performs real matrix arithmetic including inversion via Gauss-Jordan elimination, and C code generation (standalone program or callable function) with a loop-tiled multiply.
 
 `make servercheck` starts the web server in the same public mode it uses online and checks its limits: it stops a program that runs too long, needs too much memory or prints too much, refuses requests from other websites, and limits how often one visitor can run programs.
 
 `make sanitize` builds the compiler with the address and undefined-behaviour sanitizers and runs every sample through it. The same commands (`make test`, `make fuzz`, `make sanitize` and `make servercheck`) run on GitHub for every push (see the CI badge at the top).
 
-`make test` checks that compiled output matches the interpreter (with the optimizer on and off), that the generated functions return correct, freshly allocated results, and that the broken samples are rejected with exactly the expected messages and carets (the expected text is kept in `tests/*.expected`). `make fuzz` generates random programs and checks every stage (interpreter and compiled C, optimizer on and off) against an independent Python calculation.
+`make test` checks that compiled output matches the interpreter (with the optimizer on and off), that the generated functions return correct, freshly allocated results, that dead code is removed (while an unused `inverse` is kept, so a singular matrix is still reported), and that the broken samples are rejected with exactly the expected messages and carets (the expected text is kept in `tests/*.expected`). `make fuzz` generates random programs and checks every stage (interpreter and compiled C, optimizer on and off) against an independent Python calculation. Some of the programs print only some of their variables, which puts dead code through the same check.
