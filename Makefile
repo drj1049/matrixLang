@@ -9,8 +9,8 @@ HDRS = $(wildcard src/*.h)
 STAGES = lexer parser semantic optimizer optimizer_prog tac interp
 BINS   = build/compiler $(STAGES:%=build/%_test)
 
-GOOD = sample1 sample4_chain sample10_gen sample13_scale sample16_cse sample17_algebra sample21_parens sample23_paren_chain sample25_dead sample27_all_dead
-BAD  = sample2_bad sample3_undefined sample7_bad_input sample8_bad_output sample11_bad_size sample14_bad_number
+GOOD = sample1 sample4_chain sample10_gen sample13_scale sample16_cse sample17_algebra sample21_parens sample23_paren_chain sample25_dead sample27_all_dead sample29_sixteen_args
+BAD  = sample2_bad sample3_undefined sample7_bad_input sample8_bad_output sample11_bad_size sample14_bad_number sample28_too_many_args
 
 .PHONY: all test fuzz sanitize servercheck run ui clean
 
@@ -113,7 +113,7 @@ test: all
 		if [ "$$n" -ge 3 ]; then echo "PASS $$s (reported $$n errors in one run)"; \
 		else echo "FAIL $$s (reported $$n errors, wanted 3)"; exit 1; fi; \
 	done
-	@for s in sample18_many_errors sample19_many_sem_errors sample22_paren_bad sample24_caret_edge; do \
+	@for s in sample18_many_errors sample19_many_sem_errors sample22_paren_bad sample24_caret_edge sample28_too_many_args; do \
 		./build/compiler tests/$$s.matlang build/$$s.c 2> build/$$s.err.txt; \
 		if diff build/$$s.err.txt tests/$$s.expected > /dev/null; then \
 			echo "PASS $$s (error messages and carets match tests/$$s.expected)"; \

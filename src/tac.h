@@ -49,7 +49,7 @@ typedef enum {
 } TACOp;
 
 #define TAC_NAME_MAX 64
-#define TAC_MAX_CALL_ARGS 16   /* most arguments one call can hold */
+#define TAC_MAX_CALL_ARGS MAX_CALL_ARGS   /* most arguments one call can hold (16, set in parser.h) */
 
 /* One instruction. Like ASTNode, one struct serves every kind: `op` says
  * which kind, and each kind only uses the fields noted below. */

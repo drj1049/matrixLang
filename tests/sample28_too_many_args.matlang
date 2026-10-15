@@ -1,0 +1,5 @@
+# a call can take at most 16 matrices: these two have 18 and 17
+A = [[1,2],[3,4]]
+B = add(A, A, A, A, A, A, A, A, A, A, A, A, A, A, A, A, A, A)
+C = multiply(A, A, A, A, A, A, A, A, A, A, A, A, A, A, A, A, A)
+print(B)

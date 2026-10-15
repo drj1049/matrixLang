@@ -1,0 +1,9 @@
+# exactly 16 matrices in a call is the most allowed, and it works
+A = [[1,2],[3,4]]
+B = [[0,1],[1,0]]
+S = add(A, B, A, B, A, B, A, B, A, B, A, B, A, B, A, B)
+D = subtract(S, A, B, A, B, A, B, A, B, A, B, A, B, A, B, A)
+P = multiply(B, B, B, B, B, B, B, B, B, B, B, B, B, B, B, B)
+print(S)
+print(D)
+print(P)

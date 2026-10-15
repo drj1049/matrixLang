@@ -13,6 +13,11 @@
 
 #include "ast.h"
 
+/* Most matrices one add(...), subtract(...) or multiply(...) call can take.
+ * The parser rejects longer calls, because the TAC (tac.h) only has room for
+ * this many names in one instruction. */
+#define MAX_CALL_ARGS 16
+
 /* A whole program is just a flat list of statements (ASSIGN, PRINT, INPUT
  * or OUTPUT nodes), in the order they appeared in the source.
  */

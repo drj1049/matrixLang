@@ -131,6 +131,12 @@ static void gen_expr(ASTNode *node, char *out) {
 
         case NODE_FUNC_CALL: {
             char t[TAC_NAME_MAX];
+            if (node->arg_count > TAC_MAX_CALL_ARGS) {
+                /* the parser already rejects this; failing loudly beats silently dropping arguments */
+                fprintf(stderr, "internal error: a call with %d arguments reached the TAC (the limit is %d)\n",
+                        node->arg_count, TAC_MAX_CALL_ARGS);
+                exit(1);
+            }
             new_temp(t);
             TACInstr *ins = tac_emit();
             ins->op = TAC_CALL;

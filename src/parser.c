@@ -426,6 +426,9 @@ static ASTNode *parse_func_call(void) {
     if ((kw.type == TOK_ADD || kw.type == TOK_SUBTRACT || kw.type == TOK_MULTIPLY) && arg_count < 2) {
         fail_span(kw, "%s needs at least 2 arguments, got %d", kw.text, arg_count);
     }
+    if (arg_count > MAX_CALL_ARGS) {
+        fail_span(kw, "%s takes at most %d arguments, got %d", kw.text, MAX_CALL_ARGS, arg_count);
+    }
 
     return ast_at(ast_new_func_call(kw.type, args, arg_count, kw.line), kw.col, kw.len);
 }

@@ -1,0 +1,7 @@
+Parse error at line 3, column 5: add takes at most 16 arguments, got 18
+ 3 | B = add(A, A, A, A, A, A, A, A, A, A, A, A, A, A, A, A, A, A)
+   |     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Parse error at line 4, column 5: multiply takes at most 16 arguments, got 17
+ 4 | C = multiply(A, A, A, A, A, A, A, A, A, A, A, A, A, A, A, A, A)
+   |     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+2 errors found.
