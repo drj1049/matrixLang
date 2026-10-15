@@ -54,6 +54,7 @@ matrixLang/
     *_test.c                one driver per stage, plus codegen_test.c (the compiler itself)
     func_caller.c           calls the generated functions the way a real project would
     fuzz.py                 random program tester (checks the compiler against Python)
+    phase3_tests.py         12 test cases, expected answers worked out with numpy (needs numpy)
     sample*.matlang         valid and deliberately broken programs
   .github/workflows/ci.yml  runs the checks on every push
   Dockerfile  render.yaml   put the web page online (see "Putting it online")
@@ -61,6 +62,7 @@ matrixLang/
   Makefile                  make, make test, make run FILE=...
   LICENSE                   MIT
   matlangc                  one command: compile a .matlang file to C, build it and run it
+  bench_chain.sh            benchmark: one program built with -O0 and -O1, run time and memory
 ```
 
 ## Pipeline
@@ -296,3 +298,7 @@ Working: lexer, parser, AST, a written grammar, parentheses in expressions, repo
 `make sanitize` builds the compiler with the address and undefined-behaviour sanitizers and runs every sample through it. The same commands (`make test`, `make fuzz`, `make sanitize` and `make servercheck`) run on GitHub for every push (see the CI badge at the top).
 
 `make test` checks that compiled output matches the interpreter (with the optimizer on and off), that the generated functions return correct, freshly allocated results, that dead code is removed (while an unused `inverse` is kept, so a singular matrix is still reported), and that the broken samples are rejected with exactly the expected messages and carets (the expected text is kept in `tests/*.expected`). `make fuzz` generates random programs and checks every stage (interpreter and compiled C, optimizer on and off) against an independent Python calculation. Some of the programs print only some of their variables, which puts dead code through the same check.
+
+`tests/phase3_tests.py` is a separate script with 12 test cases (two each for valid, invalid, semantic, boundary, run-time and complex programs). It works out the expected answers with numpy and plain Python instead of reading them from the compiler, so it needs numpy (`pip3 install numpy`). Run `make` first, then `python3 tests/phase3_tests.py`. It ends with a line such as `tests: 12 run, 12 passed, 0 failed`. Nothing else in the project needs numpy.
+
+`bench_chain.sh` shows what the matrix chain optimizer is worth. It builds a three matrix product (1000x20, 20x1000 and 1000x20), compiles it with `-O0` and `-O1`, checks that both builds print the same result, and then prints the median run time of nine runs and the peak memory of each. Run `make` first, then `bash bench_chain.sh`. Neither script is part of the CI checks.
